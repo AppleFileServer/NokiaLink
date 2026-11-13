@@ -1,0 +1,10 @@
+; Gammu settings for the Nokia 7110 on a DLR-3P cable (this Mac).
+; Set "device" to the USB-serial adapter's name once it is plugged in
+; (ls /dev/cu.usbserial*).
+; Use (from this folder):  gammu -c gammurc-7110 identify
+[gammu]
+device = /dev/cu.usbserial-CHANGEME
+connection = fbusdlr3
+model = 7110
+logfile = traces/gammu-7110.log
+logformat = textall
