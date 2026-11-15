@@ -283,7 +283,7 @@ In order of preference:
 | 1 | Joining the Plus to the Nokia cable | An adapter lead, made by the owner (`CABLE.md`). The Nokia cable is not cut |
 | 2 | Where contacts and calendar live on the Plus | NokiaLink's own files, with plain-text export. For now; may change if other suite applications want them |
 | 3 | Messages | **Every** folder is read and copied to the archive. Only the Inbox and sent messages are cleared from the phone automatically; other folders are never cleared without being asked |
-| 4 | SIM contacts | Synced in the normal way, the same as contacts in the phone's own memory (see section 7) |
+| 4 | Contacts | **The phone's own memory is to be used for contacts,** not the SIM, so that entries can hold more than a name and one number. Contacts still on the SIM are synced in the normal way until they are moved (see section 7) |
 | 5 | Both sides changed the same entry | Not yet answered. NokiaLink asks each time until decided otherwise |
 | 6 | USB-to-serial adapter for the modern Mac | The owner is getting one. One with an FTDI chip, a 9-pin plug and true RS-232 levels is wanted (macOS has its driver built in) |
 
@@ -311,3 +311,9 @@ What follows for NokiaLink:
   NokiaLink says so; it is never silently dropped.
 - Moving a contact from one memory to the other is offered as a
   deliberate action, not done by sync.
+- **The owner's choice (15 November 2026): contacts are to live in the
+  phone's own memory.** NokiaLink writes new contacts there, and offers
+  to move the SIM's contacts across in one step (after a backup, with
+  the SIM's copies removed only once the new ones are read back). The
+  phone's own "memory in use" setting has to be changed to match; if
+  that can't be done over the cable it is done on the phone's keys.
