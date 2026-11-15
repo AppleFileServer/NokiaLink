@@ -1,8 +1,10 @@
-# MacNokia
+# NokiaLink
 
 Software for the Macintosh Plus that talks to a Nokia 7110 directly over a
 Nokia DLR-3P serial cable: contacts, calendar, text messages and whatever
 else the phone's protocol offers. No other computer is involved.
+
+Named MacNokia until 15 November 2026.
 
 **Status (13 November 2026):** project started; no Plus code yet. The serial
 cable is on order.
@@ -11,9 +13,9 @@ cable is on order.
 
 The 7110 speaks Nokia's FBUS protocol over the cable. The protocol is
 described in the documentation of the open-source Gammu project
-(`docs/manual/protocol/n7110.rst` and `nokia.rst`). MacNokia is written
+(`docs/manual/protocol/n7110.rst` and `nokia.rst`). NokiaLink is written
 from that description. It contains no Gammu code: Gammu is licensed under
-the GPL, and MacNokia is MIT.
+the GPL, and NokiaLink is MIT.
 
 Starting a session over a DLR-3 cable:
 
