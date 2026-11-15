@@ -315,5 +315,6 @@ What follows for NokiaLink:
   phone's own memory.** NokiaLink writes new contacts there, and offers
   to move the SIM's contacts across in one step (after a backup, with
   the SIM's copies removed only once the new ones are read back). The
-  phone's own "memory in use" setting has to be changed to match; if
-  that can't be done over the cable it is done on the phone's keys.
+  The owner set the phone's "memory in use" to the phone's own memory
+  on 15 November 2026. Contacts already on the SIM stay there until
+  they are moved.
