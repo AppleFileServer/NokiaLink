@@ -178,6 +178,9 @@ build against.
 
 1. FBUS layer: framing, checksums, acknowledgements, retries, long
    messages, start-up sequence. Tests replay the Phase 0 recordings.
+   **Written 15 November 2026, ahead of Phase 0,** from the protocol
+   description (`FBUS.md`), with tests against a pretend phone. Still
+   to do once Phase 0 has recordings: check it against them.
 2. `nokialink-host identify` against the real phone.
 3. Phone services, read-only first: status, clock, contacts, calendar,
    messages, call lists.

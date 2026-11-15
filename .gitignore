@@ -1,3 +1,5 @@
 .DS_Store
-# Gammu logs of the real phone hold contacts, messages and numbers
+# Gammu logs and traces of the real phone hold contacts, messages and numbers
 traces/
+# Build folders
+build*/

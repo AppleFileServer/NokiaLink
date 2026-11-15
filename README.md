@@ -6,10 +6,12 @@ else the phone's protocol offers. No other computer is involved.
 
 Named MacNokia until 15 November 2026.
 
-**Status (15 November 2026):** planned; no Plus code yet. The serial
-cable is on order.
+**Status (15 November 2026):** the FBUS link layer is written and
+tested against a pretend phone on the modern Mac. It has not yet met
+the real phone: the serial cable is on order. No Plus application yet.
 
 - The plan: [`docs/PLAN.md`](docs/PLAN.md)
+- The protocol as implemented: [`docs/FBUS.md`](docs/FBUS.md)
 - The cable between the Plus and the Nokia cable, with the pinout:
   [`docs/CABLE.md`](docs/CABLE.md)
 
@@ -122,6 +124,20 @@ Starting a session over a DLR-3 cable:
   will be measured and what to do if it doesn't.
 - **Lower speeds.** Whether the phone accepts FBUS below 115,200 baud is
   untested.
+
+## Building and testing
+
+On a modern Mac, with the command-line developer tools:
+
+    tests/run-host.sh
+
+This builds and runs the tests of the portable core (`src/core`), and
+builds `build-host/nokialink-host`, a command-line tool that runs the
+same core against the real phone through a USB-to-serial adapter:
+
+    build-host/nokialink-host identify /dev/cu.usbserial-XXXX traces/identify.txt
+
+The last argument is optional: a file to record every byte in.
 
 ## Testing with Gammu on a modern Mac
 
