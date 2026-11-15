@@ -284,7 +284,7 @@ In order of preference:
 | 2 | Where contacts and calendar live on the Plus | NokiaLink's own files, with plain-text export. For now; may change if other suite applications want them |
 | 3 | Messages | **Every** folder is read and copied to the archive. Only the Inbox and sent messages are cleared from the phone automatically; other folders are never cleared without being asked |
 | 4 | Contacts | **The phone's own memory is to be used for contacts,** not the SIM, so that entries can hold more than a name and one number. Contacts still on the SIM are synced in the normal way until they are moved (see section 7) |
-| 5 | Both sides changed the same entry | Not yet answered. NokiaLink asks each time until decided otherwise |
+| 5 | Both sides changed the same entry | NokiaLink always asks: it shows both versions and the owner chooses. No standing rule |
 | 6 | USB-to-serial adapter for the modern Mac | The owner is getting one. One with an FTDI chip, a 9-pin plug and true RS-232 levels is wanted (macOS has its driver built in) |
 
 ## 7. The phone's two contact memories
