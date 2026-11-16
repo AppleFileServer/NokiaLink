@@ -3,7 +3,7 @@
 - **Version of this specification:** 0.3 (draft), 16 November 2026
 - **Status:** In development (`../../Programme/CATALOGUE.md`)
 - **Group:** MacLife
-- **Decision codes:** the numbered decisions in `PLAN.md` §6 (1 to 18 so
+- **Decision codes:** the numbered decisions in `PLAN.md` §6 (1 to 19 so
   far); programme decisions are P-codes.
 
 This document says **what** NokiaLink does. `PLAN.md` says how and in
@@ -226,6 +226,10 @@ store, after showing what will be written.
   write.
 - **USE-11** If the Plus's clock is not trusted (CLK-1), the check
   does not run, Stay in Main is not offered, and NokiaLink says why.
+- **USE-12** A contact gets today's date as its last-used date when it
+  is added: typed on the Plus, or first found on the phone. A contact
+  that arrives with a date already keeps it. So a new contact is not
+  asked about until 18 months after it was added (decision 19).
 
 ### 4.5 Calendar (CAL)
 

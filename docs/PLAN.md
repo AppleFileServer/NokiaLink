@@ -319,6 +319,7 @@ In order of preference:
 | 16 | Acceptance run (16 November 2026) | Thirty days of ordinary use, syncing at least weekly, one real monthly check and one restore (`SPECIFICATION.md` §12) |
 | 17 | Further phone functions (16 November 2026) | The functions believed available but not in the first list (other number lists, display indicators, PIN state, IMSI, profile detail, message settings) go into the specification to be tried, and are removed if the phone refuses them (`SPECIFICATION.md` §4.14). Reaching the Pi gateway from the Plus through the phone while away is parked (section 9) |
 | 18 | Desk accessory (16 November 2026) | A desk accessory is part of the specification (`SPECIFICATION.md` §8), built after the main program's first B-1.0.0 release |
+| 19 | A new contact's date (16 November 2026) | A contact is given the date it is added as its last-used date, so the monthly check does not ask about it straight away |
 
 ## 7. The phone's two contact memories
 

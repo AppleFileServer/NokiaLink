@@ -16,6 +16,12 @@ cc $CFLAGS -fsanitize=address,undefined \
     -o "$B/test_core"
 "$B/test_core"
 
+cc $CFLAGS -fsanitize=address,undefined \
+    src/store/nldate.c src/store/nlnumber.c src/store/nlusage.c src/store/nlvcard.c \
+    tests/test_store.c \
+    -o "$B/test_store"
+"$B/test_store"
+
 cc $CFLAGS \
     src/core/fbus.c src/core/link.c \
     host/port_posix.c host/nokialink-host.c \

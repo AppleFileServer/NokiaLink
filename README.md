@@ -6,9 +6,13 @@ else the phone's protocol offers. No other computer is involved.
 
 Named MacNokia until 15 November 2026.
 
-**Status (15 November 2026):** the FBUS link layer is written and
+**Status (16 November 2026):** the FBUS link layer is written and
 tested against a pretend phone on the modern Mac. It has not yet met
-the real phone: the serial cable is on order. No Plus application yet.
+the real phone: the serial cable is on order. The store's first
+modules (dates, telephone number matching, the 18-month and clock
+rules, contact cards) are written and tested on the modern Mac. A
+first application shell builds for the Plus (menus, About box, an
+empty Phone window); it has not been run.
 
 - The specification (draft): [`docs/SPECIFICATION.md`](docs/SPECIFICATION.md)
 - The plan: [`docs/PLAN.md`](docs/PLAN.md)
@@ -139,6 +143,18 @@ same core against the real phone through a USB-to-serial adapter:
     build-host/nokialink-host identify /dev/cu.usbserial-XXXX traces/identify.txt
 
 The last argument is optional: a file to record every byte in.
+
+The same script tests the store's modules (`src/store`).
+
+The application for the Plus is built with Retro68, as the suite's
+other Plus programs are:
+
+    cmake -S . -B build \
+      -DCMAKE_TOOLCHAIN_FILE=$HOME/Retro68-build/build-target/cmake/retro68.toolchain.cmake
+    cmake --build build
+
+This makes `build/NokiaLink.bin` (MacBinary) and `build/NokiaLink.dsk`
+(a disk image).
 
 ## Testing with Gammu on a modern Mac
 
