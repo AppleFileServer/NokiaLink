@@ -157,7 +157,8 @@ dialogs, readable on the 512 × 342 screen.
 | Service | Key presses, restart, factory reset, and the uncertain engineering items |
 
 Arrivals (a call, a message) show as a small notice while NokiaLink is
-running. A desk accessory is not planned; it can be assessed later.
+running. A desk accessory is specified and is built after B-1.0.0
+(decision 18).
 
 ## 3. Phases
 
@@ -265,6 +266,12 @@ whichever uncertain items Phase 0 showed to work.
 User's Guide in the suite's manual style (7½ × 9 in, P24), release
 checklist, B-1.0.0 after the owner's acceptance run on the Plus.
 
+### Phase 12: the desk accessory
+
+After B-1.0.0 (decision 18): the desk accessory of
+`SPECIFICATION.md` §8.2, once the programme's shared desk-accessory
+study is done.
+
 ## 4. Rules for the work
 
 - **The phone is the owner's daily phone.** Read-only work comes first
@@ -311,6 +318,7 @@ In order of preference:
 | 15 | Printing (16 November 2026) | Included from the first version |
 | 16 | Acceptance run (16 November 2026) | Thirty days of ordinary use, syncing at least weekly, one real monthly check and one restore (`SPECIFICATION.md` §12) |
 | 17 | Further phone functions (16 November 2026) | The functions believed available but not in the first list (other number lists, display indicators, PIN state, IMSI, profile detail, message settings) go into the specification to be tried, and are removed if the phone refuses them (`SPECIFICATION.md` §4.14). Reaching the Pi gateway from the Plus through the phone while away is parked (section 9) |
+| 18 | Desk accessory (16 November 2026) | A desk accessory is part of the specification (`SPECIFICATION.md` §8), built after the main program's first B-1.0.0 release |
 
 ## 7. The phone's two contact memories
 

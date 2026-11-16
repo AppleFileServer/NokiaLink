@@ -1,9 +1,9 @@
 # NokiaLink: Specification
 
-- **Version of this specification:** 0.2 (draft), 16 November 2026
+- **Version of this specification:** 0.3 (draft), 16 November 2026
 - **Status:** In development (`../../Programme/CATALOGUE.md`)
 - **Group:** MacLife
-- **Decision codes:** the numbered decisions in `PLAN.md` §6 (1 to 17 so
+- **Decision codes:** the numbered decisions in `PLAN.md` §6 (1 to 18 so
   far); programme decisions are P-codes.
 
 This document says **what** NokiaLink does. `PLAN.md` says how and in
@@ -508,19 +508,47 @@ local time with no zone; they are stored as given.
   any program opens them. To be added to
   `../../Programme/ARCHITECTURE.md` §6 when agreed.
 
-## 8. Desk Accessory suitability assessment
+## 8. Desk Accessory
+
+### 8.1 Suitability assessment
 
 - Frequent, short task? Partly: looking up a number is; sync is not.
-- Useful while another application is in use? A contact lookup would
-  be. The link itself cannot share the machine safely with a
-  foreground program.
+- Useful while another application is in use? A contact lookup is.
+  The link itself cannot share the machine safely with a foreground
+  program.
 - Small memory and window? A lookup, yes.
 - Interruption-tolerant? A read-only lookup, yes. Anything using the
   link, no.
 - Simple, safe data access? Reading one vCard file is simple and safe.
-- **Conclusion:** no DA in this version. A read-only **contact lookup
-  DA** over the store is worth assessing later, after the programme's
-  shared DA study (P5). It would not use the phone.
+- **Conclusion (the owner, 16 November 2026; decision 18):** a desk
+  accessory is part of this specification. It is **built after the
+  main program's first B-1.0.0 release,** and is not needed for that
+  release's acceptance.
+
+### 8.2 The NokiaLink desk accessory (DA)
+
+What it does is **PROVISIONAL** until the owner agrees it; the
+drafting assumes a contact lookup that never uses the phone.
+
+- **DA-1** Opens from the Apple menu over any application, in a small
+  window.
+- **DA-2** Finds a contact by typing part of a name or number, in Main
+  and Archive, and shows the contact's numbers, e-mail addresses,
+  address and note.
+- **DA-3** Copies a number or address to the Clipboard.
+- **DA-4** Read-only. It never writes to the store, never changes a
+  last-used date, and never touches the serial port or the phone.
+- **DA-5** Reads the same vCard files as the application, checks each
+  against the folder's Checksums list, and shows a damaged card as
+  damaged, not as empty.
+- **DA-6** Works whether or not NokiaLink is running, and is not
+  confused by NokiaLink saving a contact while it is open (programme
+  Q5).
+- **DA-7** Small enough to live with the owner's other desk
+  accessories; memory use measured on the Plus.
+
+It waits on the programme's shared desk-accessory study (P5; Q2, Q3,
+Q5, Q6), which comes before several DAs are built.
 
 ## 9. Memory and performance constraints
 
@@ -622,7 +650,10 @@ Checklists: `../../Programme/templates/RELEASE-CHECKLIST.md` and
   what, without the same message arriving twice, is not worked out.
   Until then, contacts reached only by WhatsApp look unused to the
   phone and the owner answers Stay in Main.
-- **A contact lookup desk accessory** (section 8).
+- **Anything more in the desk accessory** than the lookup of section
+  8.2: dialling from it, or showing a notice of a call or message
+  while another application is in front. Both would need the link,
+  which a desk accessory cannot safely use.
 - **Other programs writing last-used dates** beyond the e-mail program.
 - **A 1 MB Plus** and other machines.
 - **A speed-matching box**, only if the link cannot be made reliable
@@ -642,8 +673,9 @@ Still open, for the owner:
    limits (decision 13).
 2. **Five minutes** as the difference below which the phone's clock is
    set without asking (CLK-3).
-3. Creator code `NkLk`; a starting partition of 512 KB; no desk
-   accessory in this version.
+3. Creator code `NkLk`; a starting partition of 512 KB.
+4. What the desk accessory does (section 8.2): a read-only contact
+   lookup is the draft.
 
 To be checked on the phone (Phase 0 and Phase 1): each function in
 section 4.14; whether the phone
