@@ -82,7 +82,16 @@ shown there.
 
 ### 2.2 The Plus's own files
 
-Follows the programme's data rules (`ARCHITECTURE.md` §4):
+Follows the programme's data rules (`ARCHITECTURE.md` §4).
+
+**Changed on 16 November 2026 (decisions 7 and 8, programme P29 to
+P31):** contacts, and in time the calendar and messages, are not
+NokiaLink's own files. They live in the owner's one store of plain
+text on the Plus, shared with other programs (the email program reads
+the same contact records). The store's formats are set by programme P32; the rest of its layout
+is not yet designed (programme Q24). Until it is, the list below describes what NokiaLink
+needs from it, and "NokiaLink Data" holds only what belongs to
+NokiaLink alone (phone settings, the record of the last sync).
 
 - One folder, "NokiaLink Data", holding: Contacts, Calendar, Message
   Archive, Phone Settings (ringtones, logos, profiles, bookmarks), and
@@ -284,11 +293,14 @@ In order of preference:
 | # | Subject | Decision |
 |---|---|---|
 | 1 | Joining the Plus to the Nokia cable | An adapter lead, made by the owner (`CABLE.md`). The Nokia cable is not cut |
-| 2 | Where contacts and calendar live on the Plus | NokiaLink's own files, with plain-text export. For now; may change if other suite applications want them |
+| 2 | Where contacts and calendar live on the Plus | NokiaLink's own files, with plain-text export. For now; may change if other suite applications want them. **Superseded by decision 7** |
 | 3 | Messages | **Every** folder is read and copied to the archive. Only the Inbox and sent messages are cleared from the phone automatically; other folders are never cleared without being asked |
 | 4 | Contacts | **The phone's own memory is to be used for contacts,** not the SIM, so that entries can hold more than a name and one number. Contacts still on the SIM are synced in the normal way until they are moved (see section 7) |
 | 5 | Both sides changed the same entry | NokiaLink always asks: it shows both versions and the owner chooses. No standing rule |
 | 6 | USB-to-serial adapter for the modern Mac | The owner is getting one. One with an FTDI chip, a 9-pin plug and true RS-232 levels is wanted (macOS has its driver built in) |
+| 7 | Where contacts live (16 November 2026) | In the owner's one store of plain text on the Plus, which is the master (programme P29, P30). Contacts are vCards, one file per contact, in `Contacts/Main` and `Contacts/Archive` folders, with the dates as `X-LAST-USED` and `X-KEPT-ON` lines; Mac Roman text; checksums in one list per folder (programme P32). Nothing is pushed to iCloud; backups and the archive are the Pi's AppleShare drive's job |
+| 8 | Main and Archive (16 November 2026) | Contacts are in two lists. NokiaLink syncs **Main** with the phone; Archive stays on the Plus. New contacts found on the phone are copied into Main. See section 8 |
+| 9 | The 18-month check (16 November 2026) | On the 1st of each month, or the first time NokiaLink is opened after it, NokiaLink asks at startup about Main contacts not used for over 18 months. It applies to every contact alike. See section 8 |
 
 ## 7. The phone's two contact memories
 
@@ -321,3 +333,66 @@ What follows for NokiaLink:
   The owner set the phone's "memory in use" to the phone's own memory
   on 15 November 2026. Contacts already on the SIM stay there until
   they are moved.
+
+## 8. Main, Archive and the 18-month check
+
+Decided by the owner on 16 November 2026 (decisions 7 to 9; programme
+P31).
+
+### 8.1 The two lists
+
+- Every contact is in **Main** or **Archive**. Sync (section 2.3)
+  works on Main only: the phone holds Main, and nothing in Archive is
+  sent to it.
+- A contact added on the phone is copied into Main at the next sync.
+- Moving a contact to Archive removes it from the phone at the next
+  sync, after the usual backup. Moving it back sends it again.
+
+### 8.2 The last-used date
+
+- Each contact record carries a **last-used date** and a **kept-on
+  date** (see 8.3).
+- The phone keeps no such date (**to be checked** in Phase 1), so
+  NokiaLink works it out. At every sync the texts and the call log are
+  moved to the Plus (section 2.4; the phone has little room for
+  either), and each number in them is matched against the contacts.
+  A contact used since the last sync has its last-used date set to the
+  date of the newest text or call.
+- The phone's call lists are short. A call that has dropped off the
+  list before a sync is never seen, so regular syncs matter.
+- Other programs update the same date. The email program dates a
+  contact when mail is sent to or received from it. It never creates a
+  contact.
+- A text or call from a number that matches an **archived** contact
+  moves that contact back to Main, and the next sync sends it to the
+  phone.
+
+### 8.3 The monthly check
+
+- When NokiaLink starts, it looks at whether a check is due: one is
+  due on the 1st of each month, or on the first start after it. This
+  relies on the Plus's clock being right.
+- It lists the Main contacts whose last-used date **and** kept-on date
+  are both more than 18 months old. It reads the stored dates only; it
+  does not search the messages again.
+- For each one (or all together) the owner chooses **Move to Archive**
+  or **Stay in Main**.
+- **Stay in Main** sets the kept-on date to today. The true last-used
+  date is left alone. The contact is asked about again only when 18
+  months have passed since the later of the two dates.
+- The check treats every contact alike. Contacts reached only by
+  WhatsApp will look unused to the phone until WhatsApp reaches the
+  7110 (section 8.4); the owner answers "Stay in Main" for those.
+- The owner's own card is never listed.
+
+### 8.4 Not yet decided
+
+- The first dates. The lists were drawn up on the modern Mac on 15 and
+  16 November 2026 with a last-contact date for most contacts; those
+  dates can start the last-used dates so that the first check doesn't
+  list everyone. The lists themselves are private and are not in this
+  repository.
+- How the contacts now in iCloud reach the Plus (programme Q24).
+- WhatsApp messages and email on the 7110: wanted later. Which piece
+  of hardware does what, without the same message arriving twice, is
+  not worked out.
