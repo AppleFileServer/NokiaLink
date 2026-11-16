@@ -97,6 +97,27 @@ one out if you have one: check that HSKo reaches **both** DTR and RTS.
 
 ## 5. The open question: power
 
+**Found in documents on 16 November 2026 (not yet measured):** the
+cable appears to be powered **by the phone, not by the computer.**
+
+- Nokia's service manual for the 6310i, a sibling phone, says the DLR-3
+  cable "must be supplied by the phone with 2.78 Vdc / 25 mA". The
+  7110's own manual does not mention the cable.
+- A hobbyist's schematic of the DLR-3 shows a level-shifting chip and a
+  small microcontroller inside the plug, both fed from the phone's
+  connector, and the computer's control lines going in as signals only.
+  It also says the microcontroller must answer the phone before the
+  phone accepts commands, so the cable is more than a level shifter.
+  This source is of unknown origin; it agrees with Nokia's manuals.
+- The control lines still matter: software written for this cable
+  drops DTR and RTS for a second and raises them again to reset the
+  link before starting.
+
+If this holds, the Plus's weak control line is less of a worry: it has
+to signal, not to power. The measurements below still decide it. The
+documents are in `../../MacDevelopmentReferenceLibrary/Nokia/` (see its
+index). The rest of this section was written before this was found.
+
 A PC's port gives the cable about ±12 V on two lines. The Plus gives
 about ±4 to ±5 V on one line, shared between both of the cable's power
 pins. Whether that is enough is **unknown**.

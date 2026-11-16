@@ -125,7 +125,8 @@ Starting a session over a DLR-3 cable:
   chip's 3.672 MHz clock divided by 32 gives 114,750 baud (0.4% low), so
   the program must drive the chip itself. Untested.
 - **Cable power.** The Plus has one output control line and no power pins.
-  Whether that powers the DLR-3P is unknown. `docs/CABLE.md` says how it
+  Documents found on 16 November 2026 say the phone powers the DLR-3P,
+  not the computer, so the line may only need to signal. Not measured. `docs/CABLE.md` says how it
   will be measured and what to do if it doesn't.
 - **Lower speeds.** Whether the phone accepts FBUS below 115,200 baud is
   untested.
