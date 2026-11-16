@@ -178,6 +178,8 @@ Needs the cable and a USB-to-serial adapter. No Plus involved.
    D-9 pins it uses.
 4. Try the uncertain items (network monitor, operator name, screen
    mirror, security code) to learn which the 7110 answers.
+   Try reading each of the further functions of `SPECIFICATION.md`
+   §4.14 the same way (decision 17).
 5. Try starting FBUS at lower speeds, to answer that open question.
 
 **Result:** a yes or no on each open question, and recorded sessions to
@@ -301,6 +303,14 @@ In order of preference:
 | 7 | Where contacts live (16 November 2026) | In the owner's one store of plain text on the Plus, which is the master (programme P29, P30). Contacts are vCards, one file per contact, in `Contacts/Main` and `Contacts/Archive` folders, with the dates as `X-LAST-USED` and `X-KEPT-ON` lines; Mac Roman text; checksums in one list per folder (programme P32). Nothing is pushed to iCloud; backups and the archive are the Pi's AppleShare drive's job |
 | 8 | Main and Archive (16 November 2026) | Contacts are in two lists. NokiaLink syncs **Main** with the phone; Archive stays on the Plus. New contacts found on the phone are copied into Main. See section 8 |
 | 9 | The 18-month check (16 November 2026) | On the 1st of each month, or the first time NokiaLink is opened after it, NokiaLink asks at startup about Main contacts not used for over 18 months. It applies to every contact alike. See section 8 |
+| 10 | A contact deleted on the phone (16 November 2026) | It moves to Archive on the Plus; a sync never deletes it from the store. NokiaLink can show, search and edit the Archive list, and move contacts between the lists by hand |
+| 11 | A new phone contact matching an archived one (16 November 2026) | The archived contact moves back to Main without asking; the fields the phone holds replace the stored ones |
+| 12 | Call lists (16 November 2026) | Cleared from the phone after copying, as texts are |
+| 13 | Calendar on the phone (16 November 2026) | As many notes and meetings on the phone as it can hold. How its limited memory is managed is left until the phone's limits are known (Phase 0) |
+| 14 | Clocks (16 November 2026) | The Plus is the reference. Because its clock battery can go flat, the Plus's clock is used only when it passes a check; the owner confirms it on the first connection; within a small difference the phone is set from the Plus without asking; otherwise NokiaLink asks. NokiaLink never needs the internet for this. Rules: `SPECIFICATION.md` §4.13 |
+| 15 | Printing (16 November 2026) | Included from the first version |
+| 16 | Acceptance run (16 November 2026) | Thirty days of ordinary use, syncing at least weekly, one real monthly check and one restore (`SPECIFICATION.md` §12) |
+| 17 | Further phone functions (16 November 2026) | The functions believed available but not in the first list (other number lists, display indicators, PIN state, IMSI, profile detail, message settings) go into the specification to be tried, and are removed if the phone refuses them (`SPECIFICATION.md` §4.14). Reaching the Pi gateway from the Plus through the phone while away is parked (section 9) |
 
 ## 7. The phone's two contact memories
 
@@ -396,3 +406,63 @@ P31).
 - WhatsApp messages and email on the 7110: wanted later. Which piece
   of hardware does what, without the same message arriving twice, is
   not worked out.
+
+## 9. The Plus reaching the Pi gateway while away: parked
+
+**The owner's aim (16 November 2026):** with the Plus away from home
+and the phone on its cable, connect to the Raspberry Pi gateway
+(`../PiGateway`) through the phone. **Parked by the owner the same
+day,** perhaps for a future 4G version of the 7110. Recorded here so
+the findings are not lost.
+
+**Route 1: a data call (the natural way).** Before NokiaLink starts
+its own protocol, the 7110 answers ordinary modem commands on the same
+cable. The Plus would dial the Pi's GSM board (the SIM800C of
+`../MacWAP`) as a data call and talk to the gateway at up to 9,600
+bits a second. No new hardware. It needs the network to carry 2G data
+calls at both ends: Vodafone's network (which Lebara uses) keeps 2G
+until spring 2030, but whether it still accepts data calls is not
+published and must be tried. The owner may try it.
+
+**Route 2: an ordinary voice call with the data sent as sound.**
+Looked into and not recommended:
+
+- The DLR-3P cable carries no call audio, and the Plus has no sound
+  input. A modem box would have to be built between the Plus and the
+  phone's headset connector, with a matching sound modem on the Pi.
+- A mobile voice call does not carry sound as it is; it carries a
+  description of speech, and ordinary modem tones do not survive.
+  Purpose-made "data over voice" modems in the research literature
+  reach about 1 to 2 thousand bits a second (the Hermes system: 1.2
+  thousand, on real networks): roughly an eighth of a data call,
+  around 150 characters a second, before any overhead.
+- The call is charged by the minute while the link is up.
+
+**Route 3: text messages as the carrier.** Works wherever the phone
+has signal while 2G lasts, and MacWAP's message side is being built on
+the same idea. Looked into on 16 November 2026; all figures are
+estimates until measured:
+
+- **Size:** a text carries 140 bytes; about 130 once each one is
+  numbered so that a long item can be put back together.
+- **Time:** a few seconds on the air for each text, and commonly 5 to
+  10 seconds from one end to the other through the network's message
+  centre. Texts are sent one after another, not side by side.
+- **Speed:** so roughly 13 to 26 characters a second (100 to 200 bits
+  a second). A data call is about 50 to 100 times faster; the voice
+  call method of Route 2 about 6 to 10 times faster.
+- **In practice:** a 500-character e-mail is 4 texts, 20 to 40 seconds.
+  A 2,000-character page is 16 texts, about 1½ to 2½ minutes. Any
+  request and its answer take at least 10 to 20 seconds.
+- **The real limit is the daily allowance.** Lebara's fair-use limit
+  on texts has been reported as 100 or 200 a day (not confirmed from
+  Lebara's own current terms), and one user reports a 24-hour block
+  for exceeding it. At 200 a day that is about 26,000 characters a day
+  each way. The Pi's SIM has its own allowance.
+- **Other points:** texts can arrive out of order, late or twice, so
+  each needs a number and the far end must confirm; the 7110's small
+  message memory must be emptied as texts arrive.
+
+**Fit:** short messages, a mail header list, a few lines of chat. Not
+browsing, and not files. **To measure** once the Pi's GSM board is
+fitted: 20 texts each way, timed.

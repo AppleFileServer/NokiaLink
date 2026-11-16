@@ -10,6 +10,7 @@ Named MacNokia until 15 November 2026.
 tested against a pretend phone on the modern Mac. It has not yet met
 the real phone: the serial cable is on order. No Plus application yet.
 
+- The specification (draft): [`docs/SPECIFICATION.md`](docs/SPECIFICATION.md)
 - The plan: [`docs/PLAN.md`](docs/PLAN.md)
 - The protocol as implemented: [`docs/FBUS.md`](docs/FBUS.md)
 - The cable between the Plus and the Nokia cable, with the pinout:
