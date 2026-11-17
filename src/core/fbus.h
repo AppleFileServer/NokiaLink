@@ -12,9 +12,12 @@
 #ifndef NL_FBUS_H
 #define NL_FBUS_H
 
+#ifndef NL_BASIC_TYPES
+#define NL_BASIC_TYPES
 typedef unsigned char  nl_u8;
 typedef unsigned short nl_u16;
 typedef unsigned long  nl_u32;
+#endif
 
 #define NL_FBUS_FRAME_ID   0x1E   /* first byte of every frame on a cable */
 #define NL_FBUS_DEV_PHONE  0x00

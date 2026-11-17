@@ -16,8 +16,12 @@
 #ifndef NL_TEXT_H
 #define NL_TEXT_H
 
+#ifndef NL_BASIC_TYPES
+#define NL_BASIC_TYPES
 typedef unsigned char  nl_u8;
 typedef unsigned short nl_u16;
+typedef unsigned long  nl_u32;
+#endif
 
 /* The byte put in place of a character that does not fit Mac Roman. */
 #define NL_TEXT_SUBST '?'
