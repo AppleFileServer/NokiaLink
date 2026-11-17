@@ -60,6 +60,7 @@ add_application(NokiaLink
     src/core/nlsms.c
     src/core/nlinfo.c
     src/core/nlsync.c
+    src/core/nlbase.c
     src/store/nldate.c
     src/store/nlnumber.c
     src/store/nlusage.c
