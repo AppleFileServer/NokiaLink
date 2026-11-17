@@ -33,7 +33,7 @@ cc $CFLAGS -fsanitize=address,undefined \
 "$B/test_cal"
 
 cc $CFLAGS -fsanitize=address,undefined \
-    src/core/nlpbk.c src/store/nltext.c tests/test_pbk.c \
+    src/core/nlpbk.c src/store/nltext.c src/store/nldate.c tests/test_pbk.c \
     -o "$B/test_pbk"
 "$B/test_pbk"
 

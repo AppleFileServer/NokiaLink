@@ -7,6 +7,7 @@
 #define PBK_POSTAL  0x09
 #define PBK_NOTE    0x0A
 #define PBK_NUMBER  0x0B
+#define PBK_DATETIME 0x13
 
 /* Number sub-types. */
 #define NUM_HOME    0x02
@@ -16,11 +17,17 @@
 
 static long u16(const nl_u8 *p) { return (p[0] << 8) | p[1]; }
 
+static int valid_mem(nl_u8 m)
+{
+    return m == NL_PBK_MEM_ME || m == NL_PBK_MEM_SIM ||
+           m == NL_PBK_MEM_DIALLED || m == NL_PBK_MEM_MISSED || m == NL_PBK_MEM_RECEIVED;
+}
+
 /* ---- Requests ------------------------------------------------------- */
 
 long nl_pbk_req_read(nl_u8 *out, long outsize, nl_u8 memtype, nl_u16 location)
 {
-    if (memtype != NL_PBK_MEM_ME && memtype != NL_PBK_MEM_SIM) return NL_PBK_ERR_MEM;
+    if (!valid_mem(memtype)) return NL_PBK_ERR_MEM;
     if (outsize < 14) return NL_PBK_ERR_SPACE;
     out[0] = 0x00; out[1] = 0x01; out[2] = 0x01;   /* N7110 header */
     out[3] = 0x07; out[4] = 0x01; out[5] = 0x01; out[6] = 0x00;
@@ -33,7 +40,7 @@ long nl_pbk_req_read(nl_u8 *out, long outsize, nl_u8 memtype, nl_u16 location)
 
 long nl_pbk_req_status(nl_u8 *out, long outsize, nl_u8 memtype)
 {
-    if (memtype != NL_PBK_MEM_ME && memtype != NL_PBK_MEM_SIM) return NL_PBK_ERR_MEM;
+    if (!valid_mem(memtype)) return NL_PBK_ERR_MEM;
     if (outsize < 6) return NL_PBK_ERR_SPACE;
     out[0] = 0x00; out[1] = 0x01; out[2] = 0x00;   /* N6110 header */
     out[3] = 0x03; out[4] = 0x02; out[5] = memtype;
@@ -88,6 +95,7 @@ int nl_pbk_parse_entry(const nl_u8 *body, long len, nl_u16 location, nl_pbk_entr
     e->postal[0] = 0; e->postal_lost = 0;
     e->note[0] = 0; e->note_lost = 0;
     e->nnumbers = 0;
+    e->has_when = 0; e->when.date = 0; e->when.secs = 0;
     for (i = 0; i < NL_PBK_MAX_NUMBERS; i++) { e->numbers[i].text[0] = 0; e->numbers[i].lost = 0; }
 
     if (len < 11) return NL_PBK_ERR_SHORT;
@@ -135,8 +143,16 @@ int nl_pbk_parse_entry(const nl_u8 *body, long len, nl_u16 location, nl_pbk_entr
                 e->nnumbers++;
             }
             break;
+        case PBK_DATETIME:
+            if (off + 6 + 7 <= len) {
+                const nl_u8 *d = body + off + 6;
+                e->when.date = nl_date_make((int)((d[0] << 8) | d[1]), d[2], d[3]);
+                e->when.secs = (long)d[4] * 3600 + (long)d[5] * 60 + d[6];
+                e->has_when = (e->when.date != 0);
+            }
+            break;
         default:
-            break;      /* ringtone id, caller group, date etc: ignored for now */
+            break;      /* ringtone id, caller group etc: ignored for now */
         }
         off += bs;
     }
@@ -151,5 +167,17 @@ const char *nl_num_type_name(nl_num_type t)
     case NL_NUM_FAX:    return "fax";
     case NL_NUM_WORK:   return "work";
     default:            return "general";
+    }
+}
+
+const char *nl_pbk_mem_name(nl_u8 memtype)
+{
+    switch (memtype) {
+    case NL_PBK_MEM_ME:       return "phone";
+    case NL_PBK_MEM_SIM:      return "SIM";
+    case NL_PBK_MEM_DIALLED:  return "dialled";
+    case NL_PBK_MEM_MISSED:   return "missed";
+    case NL_PBK_MEM_RECEIVED: return "received";
+    default:                  return "?";
     }
 }

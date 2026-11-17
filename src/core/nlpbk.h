@@ -17,11 +17,17 @@
 #define NL_PBK_H
 
 #include "../store/nltext.h"
+#include "../store/nldate.h"
 
 #define NL_PBK_MSG_TYPE   0x03
 
-#define NL_PBK_MEM_ME     0x05   /* the phone's own memory (several numbers, email, ...) */
-#define NL_PBK_MEM_SIM    0x06   /* the SIM card (a name and one number) */
+#define NL_PBK_MEM_ME       0x05 /* the phone's own memory (several numbers, email, ...) */
+#define NL_PBK_MEM_SIM      0x06 /* the SIM card (a name and one number) */
+/* The call registers are read the same way, by memory type; each entry
+ * carries a number, maybe a name, and the time of the call (in `when`). */
+#define NL_PBK_MEM_DIALLED  0x01
+#define NL_PBK_MEM_MISSED   0x02
+#define NL_PBK_MEM_RECEIVED 0x03
 
 #define NL_PBK_TEXT_MAX   128    /* Mac Roman name/email/postal/note + zero */
 #define NL_PBK_NUM_MAX    48     /* a phone number + zero */
@@ -51,6 +57,8 @@ typedef struct {
     char          note[NL_PBK_TEXT_MAX];   long note_lost;
     nl_pbk_number numbers[NL_PBK_MAX_NUMBERS];
     int           nnumbers;
+    int           has_when;     /* a call register gives the time of the call */
+    nl_stamp      when;
 } nl_pbk_entry;
 
 /* ---- Requests ------------------------------------------------------- */
@@ -74,5 +82,6 @@ int nl_pbk_parse_status(const nl_u8 *body, long len, nl_u16 *used, nl_u16 *total
 int nl_pbk_parse_entry(const nl_u8 *body, long len, nl_u16 location, nl_pbk_entry *e);
 
 const char *nl_num_type_name(nl_num_type t);
+const char *nl_pbk_mem_name(nl_u8 memtype);
 
 #endif

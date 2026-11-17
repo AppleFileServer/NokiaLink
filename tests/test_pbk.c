@@ -139,9 +139,46 @@ static void test_lost_and_cap(void)
     CHECK(e.nnumbers == NL_PBK_MAX_NUMBERS);   /* extra numbers dropped, not overflowed */
 }
 
+/* a DATETIME sub-block (id 0x13): date d and seconds-of-day */
+static long dt_block(nl_u8 *b, long off, int y, int mo, int da, int hh, int mi, int se)
+{
+    long bs = 6 + 8;
+    b[off]=0x13; b[off+1]=0; b[off+2]=(nl_u8)(bs>>8); b[off+3]=(nl_u8)bs; b[off+4]=0; b[off+5]=8;
+    b[off+6]=(nl_u8)(y>>8); b[off+7]=(nl_u8)y; b[off+8]=(nl_u8)mo; b[off+9]=(nl_u8)da;
+    b[off+10]=(nl_u8)hh; b[off+11]=(nl_u8)mi; b[off+12]=(nl_u8)se; b[off+13]=0;
+    return off + bs;
+}
+
+static void test_calllog(void)
+{
+    nl_u8 o[20]; nl_u8 b[128]; long off; nl_pbk_entry e; long n;
+    current = "req call register (dialled)";
+    n = nl_pbk_req_read(o, sizeof o, NL_PBK_MEM_DIALLED, 0x0001);
+    CHECK(n==14 && o[9]==0x01);
+    CHECK(nl_pbk_req_read(o,sizeof o,NL_PBK_MEM_MISSED,1)==14);
+    CHECK(nl_pbk_req_read(o,sizeof o,NL_PBK_MEM_RECEIVED,1)==14);
+    CHECK(strcmp(nl_pbk_mem_name(NL_PBK_MEM_DIALLED),"dialled")==0);
+
+    current = "call-log entry with time";
+    memset(b,0,sizeof b); b[6]=0x01; off=18;
+    off = text_block(b, off, PBK_NAME, "Pat Sample");
+    off = num_block(b, off, 0x00, "07700900123");
+    off = dt_block(b, off, 2026, 11, 17, 9, 15, 0);
+    CHECK(nl_pbk_parse_entry(b, off, 1, &e) == NL_PBK_OK);
+    CHECK(strcmp(e.name,"Pat Sample")==0 && e.nnumbers==1);
+    CHECK(e.has_when && e.when.date==nl_date_make(2026,11,17));
+    CHECK(e.when.secs == 9L*3600+15*60);
+
+    current = "plain contact has no time";
+    memset(b,0,sizeof b); b[6]=0x01; off=18;
+    off = text_block(b, off, PBK_NAME, "No Time");
+    CHECK(nl_pbk_parse_entry(b, off, 1, &e)==NL_PBK_OK && !e.has_when);
+}
+
 int main(void)
 {
     test_requests();
+    test_calllog();
     test_status();
     test_entry();
     test_sim_and_general();
