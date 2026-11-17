@@ -116,8 +116,10 @@ long nl_gsm_number(const nl_u8 *p, long avail, int semioctet,
     int field_len, toa, international, digits, i;
     long octets, n = 0;
 
-    if (avail < 2) return NL_GSM_ERR_SHORT;
+    if (avail < 1) return NL_GSM_ERR_SHORT;
     field_len = p[0];
+    if (field_len == 0) { if (outsize < 1) return NL_GSM_ERR_SPACE; out[0] = 0; return 0; }
+    if (avail < 2) return NL_GSM_ERR_SHORT;
     toa = p[1];
     if ((toa & 0x80) == 0) return NL_GSM_ERR_BADNUM;   /* top bit must be set */
     international = ((toa & 0x70) == 0x10);

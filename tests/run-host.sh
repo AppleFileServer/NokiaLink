@@ -42,6 +42,11 @@ cc $CFLAGS -fsanitize=address,undefined \
     -o "$B/test_gsm"
 "$B/test_gsm"
 
+cc $CFLAGS -fsanitize=address,undefined \
+    src/core/nlsms.c src/core/nlgsm.c src/store/nltext.c src/store/nldate.c tests/test_sms.c \
+    -o "$B/test_sms"
+"$B/test_sms"
+
 cc $CFLAGS \
     src/core/fbus.c src/core/link.c \
     host/port_posix.c host/nokialink-host.c \
