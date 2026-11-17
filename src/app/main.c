@@ -16,6 +16,9 @@
 #include <Memory.h>
 
 #include "version.h"
+#ifdef NOKIALINK_SMOKE
+#include "smoke.h"
+#endif
 
 enum {
     kMenuBar = 128,
@@ -153,6 +156,10 @@ int main(void)
     EventRecord event;
 
     Init();
+#ifdef NOKIALINK_SMOKE
+    Smoke_Run();        /* run the module checks, write "out", then quit */
+    return 0;
+#endif
     if (gPhoneWindow)
         ShowWindow(gPhoneWindow);
     while (!gQuit)
