@@ -152,6 +152,61 @@ static void test_sms(void)
           && strcmp(m.text,"Hello")==0);
 }
 
+/* Build a phonebook-entry reply body for one contact. */
+static long pbk_body(nl_u8 *b, long cap, const char *name, nl_u8 nt, const char *num)
+{
+    long off, bs; int i, tb;
+    memset(b,0,(size_t)cap); b[6]=0x01; off=18;
+    tb=2*(int)strlen(name); bs=6+tb;
+    b[off]=0x07; b[off+2]=(nl_u8)(bs>>8); b[off+3]=(nl_u8)bs; b[off+5]=(nl_u8)tb;
+    for(i=0;name[i];i++){ b[off+6+2*i]=0; b[off+7+2*i]=(nl_u8)name[i]; } off+=bs;
+    tb=2*(int)strlen(num); bs=10+tb;
+    b[off]=0x0B; b[off+2]=(nl_u8)(bs>>8); b[off+3]=(nl_u8)bs; b[off+5]=nt; b[off+9]=(nl_u8)tb;
+    for(i=0;num[i];i++){ b[off+10+2*i]=0; b[off+11+2*i]=(nl_u8)num[i]; } off+=bs;
+    return off;
+}
+
+/* The pretend phone keeps one entry per location; reading each location
+ * must bring back that location's own contact, not whichever was first. */
+static void test_contacts_by_location(void)
+{
+    fakephone fp; nl_link l; nl_u8 req[16], reply[256]; long rn, len;
+    nl_pbk_entry e;
+    static nl_u8 b1[128], b2[128], b3[128];
+    long n1, n2, n3; fp_reply r;
+
+    current = "wire: contacts by location";
+    n1 = pbk_body(b1, sizeof b1, "Ada Lovelace",    0x03, "07700900001");
+    n2 = pbk_body(b2, sizeof b2, "Alan Turing",     0x02, "07700900002");
+    n3 = pbk_body(b3, sizeof b3, "Grace Hopper",    0x00, "07700900003");
+
+    fp_init(&fp);
+    nl_link_init(&l, &fp.port, g_msgbuf, sizeof g_msgbuf, 0, 0);
+    CHECK(nl_link_start_dlr3(&l) == NL_OK);
+    /* Registered out of order, to prove the match is on the location word. */
+    memset(&r,0,sizeof r); r.req_type=NL_PBK_MSG_TYPE; r.reply_type=NL_PBK_MSG_TYPE; r.chunk=200;
+    r.use_body=1; r.body_off=10;
+    r.data=b2; r.len=n2; r.body_val=2; fp_add_reply(&fp,&r);
+    r.data=b3; r.len=n3; r.body_val=3; fp_add_reply(&fp,&r);
+    r.data=b1; r.len=n1; r.body_val=1; fp_add_reply(&fp,&r);
+
+    rn = nl_pbk_req_read(req, sizeof req, NL_PBK_MEM_ME, 1);
+    CHECK(nl_link_request(&l, NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE, reply, sizeof reply, &len, 2000) == NL_OK);
+    CHECK(nl_pbk_parse_entry(reply, len, 1, &e) == NL_PBK_OK && strcmp(e.name,"Ada Lovelace")==0);
+
+    rn = nl_pbk_req_read(req, sizeof req, NL_PBK_MEM_ME, 2);
+    CHECK(nl_link_request(&l, NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE, reply, sizeof reply, &len, 2000) == NL_OK);
+    CHECK(nl_pbk_parse_entry(reply, len, 2, &e) == NL_PBK_OK && strcmp(e.name,"Alan Turing")==0);
+
+    rn = nl_pbk_req_read(req, sizeof req, NL_PBK_MEM_ME, 3);
+    CHECK(nl_link_request(&l, NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE, reply, sizeof reply, &len, 2000) == NL_OK);
+    CHECK(nl_pbk_parse_entry(reply, len, 3, &e) == NL_PBK_OK && strcmp(e.name,"Grace Hopper")==0);
+
+    /* A location with no entry: the phone stays silent, so the request times out. */
+    rn = nl_pbk_req_read(req, sizeof req, NL_PBK_MEM_ME, 9);
+    CHECK(nl_link_request(&l, NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE, reply, sizeof reply, &len, 300) != NL_OK);
+}
+
 int main(void)
 {
     test_identify();
@@ -159,6 +214,7 @@ int main(void)
     test_battery();
     test_calendar();
     test_contact_multiframe();
+    test_contacts_by_location();
     test_sms();
     printf("wire: %d checks, %d failures\n", checks, failures);
     return failures != 0;

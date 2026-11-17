@@ -94,6 +94,12 @@ static void phone_frame(fakephone *fp)
     for (i = 0; i < fp->n_replies; i++) {
         fp_reply *r = &fp->replies[i];
         if (r->req_type != p->type) continue;
+        if (r->use_body) {
+            nl_u16 got;
+            if (fp->msg_len < r->body_off + 2) continue;
+            got = (nl_u16)((fp->msg[r->body_off] << 8) | fp->msg[r->body_off + 1]);
+            if (got != r->body_val) continue;
+        }
         if (r->extra_before) {
             static const nl_u8 extra[] = { 0x01, 0x08, 0x00, 0x71 };
             fp_send_message(fp, 0x0A, extra, (long)sizeof extra, 100, 0, 0);

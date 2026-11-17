@@ -170,36 +170,91 @@ enum {
     kAboutAlert = 128
 };
 
-/* Fill the Contacts window by decoding a few phonebook entries (made-up)
- * with the real nlpbk decoder, so the list shows the decode path on 68k.
- * (Reading many distinct contacts over the link awaits a pretend phone
- * that varies its reply by location.) */
-static void add_contact_frame(const char *name, nl_u8 ntype, const char *num)
+/* The made-up contacts the Contacts window shows. The pretend phone keeps
+ * one per location, so reading them back over the link exercises the real
+ * read path (request per location -> link -> decode). */
+typedef struct { const char *name; nl_u8 ntype; const char *num; } sample_contact;
+static const sample_contact kSample[] = {
+    { "Ada Lovelace",      0x03, "07700900001" },
+    { "Alan Turing",       0x02, "07700900002" },
+    { "Grace Hopper",      0x00, "07700900003" },
+    { "Edsger Dijkstra",   0x03, "07700900004" },
+    { "Katherine Johnson", 0x03, "07700900005" }
+};
+#define kSampleN ((int)(sizeof kSample / sizeof kSample[0]))
+
+/* Build the body of a phonebook-entry reply (what the phone sends back for
+ * one contact): a name block (0x07) and a number block (0x0B). */
+static long build_pbk_reply(nl_u8 *b, long cap, const char *name, nl_u8 ntype, const char *num)
 {
-    nl_u8 b[128]; long off; nl_pbk_entry e; int i, tb; long bs;
-    memset(b, 0, sizeof b); b[6] = 0x01; off = 18;
+    long off, bs; int i, tb;
+    memset(b, 0, (size_t)cap); b[6] = 0x01; off = 18;
     tb = 2 * (int)strlen(name); bs = 6 + tb;
     b[off]=0x07; b[off+2]=(nl_u8)(bs>>8); b[off+3]=(nl_u8)bs; b[off+5]=(nl_u8)tb;
     for (i=0; name[i]; i++) { b[off+6+2*i]=0; b[off+7+2*i]=(nl_u8)name[i]; } off += bs;
     tb = 2 * (int)strlen(num); bs = 10 + tb;
     b[off]=0x0B; b[off+2]=(nl_u8)(bs>>8); b[off+3]=(nl_u8)bs; b[off+5]=ntype; b[off+9]=(nl_u8)tb;
     for (i=0; num[i]; i++) { b[off+10+2*i]=0; b[off+11+2*i]=(nl_u8)num[i]; } off += bs;
-    if (nl_pbk_parse_entry(b, off, 1, &e) == NL_PBK_OK) {
-        char row[96]; strcpy(row, e.name);
-        if (e.nnumbers) { strcat(row, "  "); strcat(row, e.numbers[0].text); }
-        ContactsWin_AddRow(row);
+    return off;
+}
+
+static void add_entry_row(const nl_pbk_entry *e)
+{
+    char row[96];
+    strcpy(row, e->name);
+    if (e->nnumbers) { strcat(row, "  "); strcat(row, e->numbers[0].text); }
+    ContactsWin_AddRow(row);
+}
+
+/* Canned path (the normal build): decode each reply body straight away. */
+static void BuildContacts(void)
+{
+    nl_u8 b[128]; nl_pbk_entry e; long n; int i;
+    ContactsWin_Clear();
+    for (i = 0; i < kSampleN; i++) {
+        n = build_pbk_reply(b, sizeof b, kSample[i].name, kSample[i].ntype, kSample[i].num);
+        if (nl_pbk_parse_entry(b, n, (nl_u16)(i+1), &e) == NL_PBK_OK)
+            add_entry_row(&e);
     }
 }
 
-static void BuildContacts(void)
+#ifdef NOKIALINK_FAKEPHONE
+/* Link path (the pretend-phone build): the pretend phone keeps one entry
+ * per location, and the list is filled by asking for locations 1..N over
+ * the link and decoding each reply -- the whole read path on the 68000. */
+static fakephone gFakeC;
+static nl_link   gLinkC;
+static nl_u8     gLinkCMsg[1024];
+static nl_u8     gPbkBody[8][96];   /* a held reply body per location */
+
+static void BuildContactsViaLink(void)
 {
+    nl_u8 req[32], reply[256]; long rn, len, n; int i;
+    nl_pbk_entry e; fp_reply r;
+
     ContactsWin_Clear();
-    add_contact_frame("Ada Lovelace",    0x03, "07700900001");
-    add_contact_frame("Alan Turing",     0x02, "07700900002");
-    add_contact_frame("Grace Hopper",    0x00, "07700900003");
-    add_contact_frame("Edsger Dijkstra", 0x03, "07700900004");
-    add_contact_frame("Katherine Johnson",0x03,"07700900005");
+    fp_init(&gFakeC);
+    for (i = 0; i < kSampleN && i < 8; i++) {
+        n = build_pbk_reply(gPbkBody[i], (long)sizeof gPbkBody[i],
+                            kSample[i].name, kSample[i].ntype, kSample[i].num);
+        memset(&r, 0, sizeof r);
+        r.req_type = 0x03; r.reply_type = 0x03; r.data = gPbkBody[i]; r.len = n; r.chunk = 200;
+        r.use_body = 1; r.body_off = 10; r.body_val = (nl_u16)(i + 1);   /* match the location */
+        fp_add_reply(&gFakeC, &r);
+    }
+    nl_link_init(&gLinkC, &gFakeC.port, gLinkCMsg, sizeof gLinkCMsg, 0, 0);
+    nl_link_start_dlr3(&gLinkC);
+
+    for (i = 0; i < kSampleN && i < 8; i++) {
+        rn = nl_pbk_req_read(req, sizeof req, NL_PBK_MEM_ME, (nl_u16)(i + 1));
+        if (rn > 0 &&
+            nl_link_request(&gLinkC, 0x03, req, rn, 0x03, reply, sizeof reply, &len, 3000) == NL_OK &&
+            nl_pbk_parse_entry(reply, len, (nl_u16)(i + 1), &e) == NL_PBK_OK)
+            add_entry_row(&e);
+    }
+    (void)BuildContacts;
 }
+#endif
 
 /* The stack: the Toolbox's own calls and interrupts come on top of what
    NokiaLink uses. Set before the heap is first grown. */
@@ -349,7 +404,11 @@ static void Init(void)
 #endif
     gPhoneWindow = GetNewWindow(kPhoneWindow, nil, (WindowPtr)-1L);
     ContactsWin_Create();
+#ifdef NOKIALINK_FAKEPHONE
+    BuildContactsViaLink();
+#else
     BuildContacts();
+#endif
     ContactsWin_Show();   /* open it at startup so the list is visible */
 }
 

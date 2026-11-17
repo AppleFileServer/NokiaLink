@@ -7,7 +7,7 @@
 #include "../src/core/link.h"
 
 #define FP_QUEUE   16384
-#define FP_REPLIES 4
+#define FP_REPLIES 16
 #define FP_FRAMES  64
 
 typedef struct {
@@ -19,6 +19,13 @@ typedef struct {
     int repeat_frames;     /* send every frame twice */
     int corrupt_first;     /* send a damaged copy of the first frame first */
     int extra_before;      /* send an unrelated message (type 0x0A) first */
+    /* Optionally answer only when the request body carries a given value,
+     * so several replies of one type can be told apart -- e.g. a phonebook
+     * read whose location (a 16-bit big-endian word in the request body)
+     * picks which contact comes back. */
+    int use_body;          /* if nonzero, require the two bytes below to match */
+    long body_off;         /* offset of the high byte in the request body */
+    nl_u16 body_val;       /* required big-endian value at body_off */
 } fp_reply;
 
 typedef struct {
