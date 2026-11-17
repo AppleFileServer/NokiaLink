@@ -12,7 +12,8 @@ the real phone: the serial cable is on order. The store's first
 modules (dates, telephone number matching, the 18-month and clock
 rules, contact cards) are written and tested on the modern Mac. A
 first application shell builds for the Plus (menus, About box, an
-empty Phone window); it has not been run.
+empty Phone window). It runs in Mini vMac (16 November 2026); it has
+not been tried on the real Plus.
 
 - The specification (draft): [`docs/SPECIFICATION.md`](docs/SPECIFICATION.md)
 - The plan: [`docs/PLAN.md`](docs/PLAN.md)
