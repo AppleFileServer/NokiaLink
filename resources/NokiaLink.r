@@ -68,14 +68,31 @@ resource 'MENU' (130) {
     }
 };
 
+/* The View menu: windows the owner can open. */
+resource 'MENU' (131) {
+    131, textMenuProc;
+    allEnabled, enabled;
+    "View";
+    {
+        "Contacts", noIcon, noKey, noMark, plain;
+    }
+};
+
 resource 'MBAR' (128) {
-    { 128, 129, 130 }
+    { 128, 129, 130, 131 }
 };
 
 /* The Phone window: for now it only says that no phone is connected. */
 resource 'WIND' (128) {
     {48, 16, 168, 336},
     noGrowDocProc, invisible, noGoAway, 0, "Phone",
+    noAutoCenter
+};
+
+/* The Contacts window: a scrolling list. */
+resource 'WIND' (129) {
+    {70, 60, 300, 320},
+    noGrowDocProc, invisible, goAway, 0, "Contacts",
     noAutoCenter
 };
 

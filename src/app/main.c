@@ -19,6 +19,8 @@
 
 #include "version.h"
 #include "nlinfo.h"
+#include "nlpbk.h"
+#include "contactswin.h"
 #ifdef NOKIALINK_SMOKE
 #include "smoke.h"
 #endif
@@ -163,9 +165,41 @@ enum {
     kAppleMenu = 128, kAboutItem = 1,
     kFileMenu = 129, kQuitItem = 1,
     kEditMenu = 130,
+    kViewMenu = 131, kContactsItem = 1,
     kPhoneWindow = 128,
     kAboutAlert = 128
 };
+
+/* Fill the Contacts window by decoding a few phonebook entries (made-up)
+ * with the real nlpbk decoder, so the list shows the decode path on 68k.
+ * (Reading many distinct contacts over the link awaits a pretend phone
+ * that varies its reply by location.) */
+static void add_contact_frame(const char *name, nl_u8 ntype, const char *num)
+{
+    nl_u8 b[128]; long off; nl_pbk_entry e; int i, tb; long bs;
+    memset(b, 0, sizeof b); b[6] = 0x01; off = 18;
+    tb = 2 * (int)strlen(name); bs = 6 + tb;
+    b[off]=0x07; b[off+2]=(nl_u8)(bs>>8); b[off+3]=(nl_u8)bs; b[off+5]=(nl_u8)tb;
+    for (i=0; name[i]; i++) { b[off+6+2*i]=0; b[off+7+2*i]=(nl_u8)name[i]; } off += bs;
+    tb = 2 * (int)strlen(num); bs = 10 + tb;
+    b[off]=0x0B; b[off+2]=(nl_u8)(bs>>8); b[off+3]=(nl_u8)bs; b[off+5]=ntype; b[off+9]=(nl_u8)tb;
+    for (i=0; num[i]; i++) { b[off+10+2*i]=0; b[off+11+2*i]=(nl_u8)num[i]; } off += bs;
+    if (nl_pbk_parse_entry(b, off, 1, &e) == NL_PBK_OK) {
+        char row[96]; strcpy(row, e.name);
+        if (e.nnumbers) { strcat(row, "  "); strcat(row, e.numbers[0].text); }
+        ContactsWin_AddRow(row);
+    }
+}
+
+static void BuildContacts(void)
+{
+    ContactsWin_Clear();
+    add_contact_frame("Ada Lovelace",    0x03, "07700900001");
+    add_contact_frame("Alan Turing",     0x02, "07700900002");
+    add_contact_frame("Grace Hopper",    0x00, "07700900003");
+    add_contact_frame("Edsger Dijkstra", 0x03, "07700900004");
+    add_contact_frame("Katherine Johnson",0x03,"07700900005");
+}
 
 /* The stack: the Toolbox's own calls and interrupts come on top of what
    NokiaLink uses. Set before the heap is first grown. */
@@ -227,6 +261,10 @@ static void DoMenu(long choice)
     case kEditMenu:
         SystemEdit(item - 1);   /* a desk accessory's, if one is in front */
         break;
+    case kViewMenu:
+        if (item == kContactsItem)
+            ContactsWin_Show();
+        break;
     }
     HiliteMenu(0);
 }
@@ -249,9 +287,15 @@ static void HandleEvent(EventRecord *event)
         case inDrag:
             DragWindow(window, event->where, &qd.screenBits.bounds);
             break;
+        case inGoAway:
+            if (TrackGoAway(window, event->where))
+                HideWindow(window);
+            break;
         case inContent:
             if (window != FrontWindow())
                 SelectWindow(window);
+            else if (window == ContactsWin_Window())
+                ContactsWin_Click(event);
             break;
         }
         break;
@@ -262,10 +306,18 @@ static void HandleEvent(EventRecord *event)
         break;
     case updateEvt:
         window = (WindowPtr)event->message;
-        BeginUpdate(window);
-        if (window == gPhoneWindow)
+        if (window == gPhoneWindow) {
+            BeginUpdate(window);
             DrawPhoneWindow();
-        EndUpdate(window);
+            EndUpdate(window);
+        } else if (window == ContactsWin_Window()) {
+            ContactsWin_Update();
+        }
+        break;
+    case activateEvt:
+        window = (WindowPtr)event->message;
+        if (window == ContactsWin_Window())
+            ContactsWin_Activate((event->modifiers & activeFlag) != 0);
         break;
     }
 }
@@ -296,6 +348,9 @@ static void Init(void)
     BuildSampleStatus();
 #endif
     gPhoneWindow = GetNewWindow(kPhoneWindow, nil, (WindowPtr)-1L);
+    ContactsWin_Create();
+    BuildContacts();
+    ContactsWin_Show();   /* open it at startup so the list is visible */
 }
 
 int main(void)
