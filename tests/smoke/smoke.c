@@ -159,6 +159,18 @@ static void run_checks(void)
       CK(nl_sms_parse_message(b,9+35+tn,&m)==NL_SMS_OK && m.pdu==NL_SMS_DELIVER
          && strcmp(m.number,"+447700900123")==0 && strcmp(m.text,"Hello")==0, "sms deliver"); }
 
+    /* phone info: identify, clock, network */
+    { nl_u8 b[64]; nl_info_ident id; long n; const char *t="V 04.80\r23-02-00\rNSE-5\r"; int i;
+      memset(b,0,sizeof b); b[3]=0xD2; for(n=4,i=0;t[i];i++) b[n++]=(nl_u8)t[i];
+      CK(nl_info_parse_identify(b,n,&id)==NL_INFO_OK && strcmp(id.model,"NSE-5")==0
+         && strcmp(id.version,"04.80")==0 && strcmp(id.date,"23-02-00")==0, "info identify"); }
+    { nl_u8 b[64]; nl_info_ident id; long n; const char *t="V 04.80\r23-02-00\rNSE-5\r"; int i;
+      char fw[40]; memset(b,0,sizeof b); b[3]=0xD2; for(n=4,i=0;t[i];i++) b[n++]=(nl_u8)t[i];
+      fw[0]=0;
+      if (nl_info_parse_identify(b,n,&id)==NL_INFO_OK) {
+        strcpy(fw,"Firmware "); strcat(fw,id.version); strcat(fw,", "); strcat(fw,id.date); }
+      Log(fw); CK(strcmp(fw,"Firmware 04.80, 23-02-00")==0, "firmware string built"); }
+
     /* phone info: clock + network */
     { nl_u8 b[48]; nl_stamp st; nl_info_network net; int i;
       memset(b,0,sizeof b); b[3]=0x63; b[4]=1;
