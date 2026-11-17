@@ -11,6 +11,11 @@ mkdir -p "$B"
 CFLAGS="-std=c99 -Wall -Wextra -Wpedantic -Wconversion -Wno-sign-conversion -O1 -g"
 
 cc $CFLAGS -fsanitize=address,undefined \
+    src/core/nlsync.c tests/test_sync.c \
+    -o "$B/test_sync"
+"$B/test_sync"
+
+cc $CFLAGS -fsanitize=address,undefined \
     src/core/fbus.c src/core/link.c \
     tests/fakephone.c tests/test_core.c \
     -o "$B/test_core"
