@@ -16,6 +16,11 @@ cc $CFLAGS -fsanitize=address,undefined \
 "$B/test_sync"
 
 cc $CFLAGS -fsanitize=address,undefined \
+    src/store/nlcrc.c src/store/nlcontact.c src/store/nlvcard.c src/store/nlnumber.c tests/test_contact.c \
+    -o "$B/test_contact"
+"$B/test_contact"
+
+cc $CFLAGS -fsanitize=address,undefined \
     src/core/fbus.c src/core/link.c \
     tests/fakephone.c tests/test_core.c \
     -o "$B/test_core"

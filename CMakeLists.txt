@@ -65,6 +65,8 @@ add_application(NokiaLink
     src/store/nlusage.c
     src/store/nlvcard.c
     src/store/nltext.c
+    src/store/nlcrc.c
+    src/store/nlcontact.c
     resources/NokiaLink.r
     ${CMAKE_BINARY_DIR}/version.r
 )
