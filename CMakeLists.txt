@@ -82,4 +82,14 @@ if(NOKIALINK_SMOKE)
     target_include_directories(NokiaLink PRIVATE tests/smoke)
     target_compile_definitions(NokiaLink PRIVATE NOKIALINK_SMOKE)
 endif()
+
+# The pretend phone wired into the app (tests/run-fake.sh): the Phone
+# window's data is fetched through the link from the pretend phone, not
+# decoded from canned frames. For seeing the whole stack run in Mini vMac.
+option(NOKIALINK_FAKEPHONE "Drive the app from the pretend phone" OFF)
+if(NOKIALINK_FAKEPHONE)
+    target_sources(NokiaLink PRIVATE tests/fakephone.c)
+    target_include_directories(NokiaLink PRIVATE tests)
+    target_compile_definitions(NokiaLink PRIVATE NOKIALINK_FAKEPHONE)
+endif()
 target_compile_options(NokiaLink PRIVATE -Wall -Wextra -Wno-multichar -Wno-unused-parameter -Wno-pointer-sign)
