@@ -19,6 +19,10 @@
 #include "nlsync.h"
 #include "nlbase.h"
 #include "nlctsync.h"
+#include "nlmsgarc.h"
+#include "nllogarc.h"
+#include "nlctvcard.h"
+#include "nlcalvcs.h"
 
 static int g_fail, g_checks;
 
@@ -200,6 +204,38 @@ static void run_checks(void)
 
     /* contacts policy */
     CK(nl_ct_policy(NL_SYNC_DELETE_FROM_STORE)==NL_CT_MOVE_TO_ARCHIVE, "ct policy archive");
+
+    /* message archive line + fingerprint */
+    { static char line2[256]; nl_msg_rec r; nl_u32 a, b2;
+      memset(&r,0,sizeof r); r.folder="Inbox"; r.incoming=1; r.number="+447700900123";
+      r.name="Pat"; r.date=nl_date_make(2026,11,16); r.has_time=0; r.parts=1; r.text="Hi\tthere";
+      CK(nl_msgarc_format(&r,line2,sizeof line2)>0 && strstr(line2,"\tInbox\treceived\t")!=0
+         && strstr(line2,"Hi\\tthere\n")!=0, "msgarc format");
+      a=nl_msgarc_fingerprint(&r); r.name="Other"; b2=nl_msgarc_fingerprint(&r);
+      CK(a==b2, "msgarc fp ignores name"); }
+
+    /* call-log line */
+    { static char line2[128]; nl_log_rec r;
+      r.kind="received"; r.number="+447700900123"; r.name="Pat";
+      r.date=nl_date_make(2026,11,18); r.secs=9L*3600+24*60+5; r.has_time=1;
+      CK(nl_logarc_format(&r,line2,sizeof line2)>0
+         && strstr(line2,"\treceived\t+447700900123\tPat\t2026-11-18 09:24:05\n")!=0, "logarc format"); }
+
+    /* contact -> vCard */
+    { static nl_vcard v; static nl_pbk_entry e; char val[64];
+      memset(&e,0,sizeof e); strcpy(e.name,"Pat"); e.nnumbers=1;
+      e.numbers[0].type=NL_NUM_MOBILE; strcpy(e.numbers[0].text,"12345");
+      CK(nl_ctvcard_build(&v,&e,"Main",NL_PBK_MEM_SIM,0,0,"uid1")==NL_VC_OK
+         && nl_vcard_get(&v,"FN",0,val,sizeof val)==3 && strcmp(val,"Pat")==0, "ctvcard build");
+      CK(nl_vcard_get(&v,"CATEGORIES",0,val,sizeof val)>0
+         && strcmp(val,"card,Main")==0, "ctvcard categories"); }
+
+    /* note -> vCalendar */
+    { static char vcs[512]; nl_cal_note nn;
+      memset(&nn,0,sizeof nn); nn.type=NL_CAL_MEETING; nn.date=nl_date_make(2026,11,13);
+      nn.hour=17; nn.minute=40; strcpy(nn.text,"Flight");
+      CK(nl_calvcs_build(&nn,"u1",vcs,sizeof vcs)>0 && strstr(vcs,"DTSTART:20261113T174000\r")!=0
+         && strstr(vcs,"SUMMARY:Flight\r")!=0 && strstr(vcs,"CATEGORIES:MEETING\r")!=0, "calvcs build"); }
 }
 
 void Smoke_Run(void)
