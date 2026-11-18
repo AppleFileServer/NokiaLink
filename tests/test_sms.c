@@ -126,6 +126,32 @@ static void test_smsc(void)
     b[3]=0x35; CHECK(nl_sms_parse_smsc(b,44,num,sizeof num,nm,sizeof nm)==NL_SMS_ERR_TYPE);
 }
 
+static void test_send(void)
+{
+    nl_u8 o[128]; long n; const nl_u8 *f;
+    current = "send submit frame";
+    n = nl_sms_req_send(o, sizeof o, "+447785014317", "+447700900123", "Hi");
+    /* wrapper 00 01 00 01 02 00, then the SUBMIT frame */
+    CHECK(o[0]==0 && o[1]==1 && o[2]==0 && o[3]==0x01 && o[4]==0x02 && o[5]==0x00);
+    f = o + 6;
+    CHECK(f[0]==7 && f[1]==0x91);                 /* SMSC: 7 octets, international */
+    CHECK(f[2]==0x44 && f[7]==0x71);              /* SMSC BCD ends 17 -> 0x71 */
+    CHECK(f[12]==0x11);                           /* SUBMIT + relative validity */
+    CHECK(f[15]==0x00 && f[16]==2);               /* DCS 7-bit; TP-UDL = 2 septets */
+    CHECK(f[17]==12 && f[18]==0x91);              /* recipient: 12 digits, international */
+    CHECK(f[19]==0x44 && f[24]==0x32);            /* recipient BCD */
+    CHECK(f[29]==0xAA);                           /* validity */
+    CHECK(f[36]==0xC8 && f[37]==0x34);            /* "Hi" packed 7-bit */
+    CHECK(n == 6 + 36 + 2);
+
+    current = "send reply ok/fail";
+    { nl_u8 r[8]; int ref = -1, ec = -1;
+      memset(r,0,sizeof r); r[3]=0x02; r[5]=0x07;
+      CHECK(nl_sms_parse_send(r, 6, &ref, &ec)==NL_SMS_OK && ref==7);
+      r[3]=0x03; r[6]=0x1C;
+      CHECK(nl_sms_parse_send(r, 7, &ref, &ec)!=NL_SMS_OK && ec==0x1C); }
+}
+
 static void test_requests(void)
 {
     nl_u8 o[8]; long n;
@@ -232,6 +258,7 @@ int main(void)
     test_concat();
     test_folders();
     test_smsc();
+    test_send();
     printf("sms: %d checks, %d failures\n", checks, failures);
     return failures != 0;
 }

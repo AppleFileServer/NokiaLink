@@ -99,6 +99,38 @@ long nl_sms_req_delete(nl_u8 *out, long outsize, nl_u8 folderid, nl_u16 location
     return 8;
 }
 
+long nl_sms_req_send(nl_u8 *out, long outsize, const char *smsc,
+                     const char *dest, const char *text)
+{
+    nl_u8 sep[256]; nl_u8 *f; long cap; int sn, oct, i;
+
+    if (outsize < 6 + 36) return NL_SMS_ERR_SPACE;
+    out[0]=0x00; out[1]=0x01; out[2]=0x00;   /* N6110 header */
+    out[3]=0x01; out[4]=0x02; out[5]=0x00;   /* send-SMS */
+
+    f = out + 6; cap = outsize - 6;
+    for (i = 0; i < 36; i++) f[i] = 0;                       /* clear to the text field */
+    if (nl_gsm_number_encode(smsc, f + 0, 12, 0) < 0) return NL_SMS_ERR_SPACE;  /* SMSC */
+    f[12] = 0x11;                                            /* SUBMIT + relative validity */
+    /* f[13] TPMR, f[14] TPPID, f[15] TPDCS all 0 (7-bit) */
+    if (nl_gsm_number_encode(dest, f + 17, 12, 1) < 0) return NL_SMS_ERR_SPACE; /* recipient */
+    f[29] = 0xAA;                                            /* validity ~4 days */
+    sn = nl_macroman_to_gsm7(text, sep, (int)sizeof sep);
+    if (sn < 0) return NL_SMS_ERR_SPACE;
+    f[16] = (nl_u8)sn;                                       /* TP-UDL in septets */
+    oct = nl_gsm7_pack(sep, sn, f + 36, (int)(cap - 36));
+    if (oct < 0) return NL_SMS_ERR_SPACE;
+    return 6 + 36 + oct;
+}
+
+int nl_sms_parse_send(const nl_u8 *body, long len, int *ref, int *err_code)
+{
+    if (len < 4) return NL_SMS_ERR_SHORT;
+    if (body[3] == NL_SMS_SEND_OK) { if (ref && len > 5) *ref = body[5]; return NL_SMS_OK; }
+    if (body[3] == NL_SMS_SEND_FAIL) { if (err_code && len > 6) *err_code = body[6]; return NL_SMS_ERR_TYPE; }
+    return NL_SMS_ERR_TYPE;
+}
+
 int nl_sms_parse_smsc(const nl_u8 *body, long len,
                       char *number, long numsize, char *name, long namesize)
 {

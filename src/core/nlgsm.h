@@ -48,6 +48,23 @@ long nl_gsm7_to_macroman(const nl_u8 *in, long in_len, int fill_bits,
 long nl_gsm_number(const nl_u8 *p, long avail, int semioctet,
                    char *out, long outsize);
 
+/* ---- Encoding (Phase 2, for sending) -------------------------------- */
+
+/* Pack `n` 7-bit values (septet-aligned, no fill) into octets at out.
+ * Returns the octet count, or NL_GSM_ERR_SPACE. */
+int nl_gsm7_pack(const nl_u8 *septets, int n, nl_u8 *out, int outmax);
+
+/* Map Mac Roman text to GSM default-alphabet 7-bit values (one per char).
+ * Characters outside the supported set become '?' (0x3F). Returns the
+ * count, or NL_GSM_ERR_SPACE. */
+int nl_macroman_to_gsm7(const char *mac, nl_u8 *septets, int maxsep);
+
+/* Encode a number string into a GSM address field at out. `semioctet` 1
+ * gives a message address (length byte = digit count), 0 a service centre
+ * (length byte = octet count including the type byte). A leading '+' marks
+ * an international number. Returns the field length, or an error. */
+long nl_gsm_number_encode(const char *number, nl_u8 *out, long outsize, int semioctet);
+
 /* Decode a seven-octet SMS timestamp at `p`. Fills *out (date and
  * seconds-of-day) and, if not null, *tz_quarters with the time-zone
  * offset in quarter-hours (signed). Returns NL_GSM_OK or NL_GSM_ERR_SHORT. */

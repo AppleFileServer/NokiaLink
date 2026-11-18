@@ -89,6 +89,15 @@ long nl_sms_req_smsc(nl_u8 *out, long outsize, nl_u8 location);
 #define NL_SMS_DELETE_OK2  0x0C
 long nl_sms_req_delete(nl_u8 *out, long outsize, nl_u8 folderid, nl_u16 location);
 
+/* Send a text (SMS-SUBMIT) to `dest` via service centre `smsc`, 7-bit text.
+ * Sent with type NL_SMS_SMSC_TYPE (0x02); the reply is sub NL_SMS_SEND_OK
+ * (sent) or NL_SMS_SEND_FAIL (with an error code). Returns the body length. */
+#define NL_SMS_SEND_OK    0x02
+#define NL_SMS_SEND_FAIL  0x03
+long nl_sms_req_send(nl_u8 *out, long outsize, const char *smsc,
+                     const char *dest, const char *text);
+int  nl_sms_parse_send(const nl_u8 *body, long len, int *ref, int *err_code);
+
 /* ---- Replies -------------------------------------------------------- */
 
 int nl_sms_parse_status(const nl_u8 *body, long len, nl_sms_status *st);

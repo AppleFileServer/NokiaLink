@@ -823,6 +823,31 @@ static int do_calls(nl_link *l)
     return bad;
 }
 
+/* Send a text message to `dest`, using the phone's own service centre. */
+static int do_send_sms(nl_link *l, const char *dest, const char *text)
+{
+    nl_u8 req[300], reply[128]; long rn, len; int err, ref = -1, ec = -1;
+    char smsc[48], nm[48];
+
+    rn = nl_sms_req_smsc(req, sizeof req, 1);
+    err = nl_link_request(l, NL_SMS_SMSC_TYPE, req, rn, NL_SMS_SMSC_TYPE, reply, sizeof reply, &len, 2500);
+    if (err == NL_ERR_TIMEOUT)
+        err = nl_link_request(l, NL_SMS_SMSC_TYPE, req, rn, NL_SMS_SMSC_TYPE, reply, sizeof reply, &len, 2500);
+    if (err != NL_OK || nl_sms_parse_smsc(reply, len, smsc, sizeof smsc, nm, sizeof nm) != NL_SMS_OK || !smsc[0]) {
+        printf("send: could not read the message centre number\n"); return 1;
+    }
+
+    rn = nl_sms_req_send(req, sizeof req, smsc, dest, text);
+    if (rn < 0) { printf("send: could not build the message (too long?)\n"); return 1; }
+    printf("sending to %s via %s ...\n", dest, smsc);
+    err = nl_link_request(l, NL_SMS_SMSC_TYPE, req, rn, NL_SMS_SMSC_TYPE, reply, sizeof reply, &len, 10000);
+    if (err != NL_OK) { printf("send: %s\n", error_text(err)); return 1; }
+    err = nl_sms_parse_send(reply, len, &ref, &ec);
+    if (err == NL_SMS_OK) { printf("sent (network reference %d)\n", ref); return 0; }
+    printf("send failed (phone/network error code %d)\n", ec);
+    return 1;
+}
+
 /* SIM-held settings: the message centre (SMSC) and the owner's own
  * number(s). Read-only. */
 static int do_siminfo(nl_link *l)
@@ -1372,7 +1397,8 @@ int main(int argc, char **argv)
                         "           archive-sms <device> <archive-file>\n"
                         "           archive-contacts <device> <store-folder>\n"
                         "           archive-calls <device> <archive-file>\n"
-                        "           archive-calendar <device> <store-folder>\n");
+                        "           archive-calendar <device> <store-folder>\n"
+                        "           send-sms <device> <number> <text>\n");
         return 2;
     }
     cmd = argv[1];
@@ -1380,7 +1406,13 @@ int main(int argc, char **argv)
         fprintf(stderr, "can't open %s: %s\n", argv[2], strerror(errno));
         return 1;
     }
-    if (strcmp(cmd, "archive-sms") == 0 || strcmp(cmd, "archive-contacts") == 0 ||
+    if (strcmp(cmd, "send-sms") == 0) {
+        if (argc < 5) {
+            fprintf(stderr, "usage: nokialink-host send-sms <device> <number> <text>\n");
+            posix_port_close(&pp);
+            return 2;
+        }
+    } else if (strcmp(cmd, "archive-sms") == 0 || strcmp(cmd, "archive-contacts") == 0 ||
         strcmp(cmd, "archive-calls") == 0 || strcmp(cmd, "archive-calendar") == 0 || strcmp(cmd, "sync-dry") == 0 ||
         strcmp(cmd, "sync-contacts") == 0) {
         int wantsfolder = (strcmp(cmd, "archive-contacts") == 0 ||
@@ -1424,6 +1456,7 @@ int main(int argc, char **argv)
     else if (strcmp(cmd, "calendar") == 0) bad = do_calendar(&link);
     else if (strcmp(cmd, "calls")    == 0) bad = do_calls(&link);
     else if (strcmp(cmd, "sim-info") == 0) bad = do_siminfo(&link);
+    else if (strcmp(cmd, "send-sms") == 0) bad = do_send_sms(&link, argv[3], argv[4]);
     else if (strcmp(cmd, "migrate-sim") == 0) bad = do_migrate_sim(&link);
     else if (strcmp(cmd, "clear-sms") == 0) bad = do_clear_sms(&link);
     else if (strcmp(cmd, "clear-outbox") == 0) bad = do_clear_outbox(&link);

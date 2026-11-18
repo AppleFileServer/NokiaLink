@@ -171,3 +171,61 @@ int nl_gsm_timestamp(const nl_u8 *p, long avail, nl_stamp *out, int *tz_quarters
     if (out->date == 0) return NL_GSM_ERR_SHORT;   /* not a real date */
     return NL_GSM_OK;
 }
+
+/* ---- Encoding (Phase 2) ---------------------------------------------- */
+
+int nl_gsm7_pack(const nl_u8 *septets, int n, nl_u8 *out, int outmax)
+{
+    int i, nbytes = (n * 7 + 7) / 8;
+    if (nbytes > outmax) return NL_GSM_ERR_SPACE;
+    for (i = 0; i < nbytes; i++) out[i] = 0;
+    for (i = 0; i < n; i++) {
+        int bit = i * 7, by = bit >> 3, sh = bit & 7;
+        out[by] |= (nl_u8)((septets[i] << sh) & 0xFF);
+        if (sh > 1) out[by + 1] |= (nl_u8)(septets[i] >> (8 - sh));
+    }
+    return nbytes;
+}
+
+int nl_macroman_to_gsm7(const char *mac, nl_u8 *septets, int maxsep)
+{
+    int n = 0;
+    const unsigned char *p = (const unsigned char *)mac;
+    for (; *p; p++) {
+        unsigned char c = *p;
+        nl_u8 g;
+        if (n >= maxsep) return NL_GSM_ERR_SPACE;
+        if      (c == '@')  g = 0x00;
+        else if (c == '$')  g = 0x02;
+        else if (c == '_')  g = 0x11;
+        else if (c == '\n') g = 0x0A;
+        else if (c == '\r') g = 0x0D;
+        else if (c >= 0x20 && c <= 0x3F) g = c;   /* space, digits, punctuation ($ handled) */
+        else if (c >= 0x41 && c <= 0x5A) g = c;   /* A-Z */
+        else if (c >= 0x61 && c <= 0x7A) g = c;   /* a-z */
+        else g = 0x3F;                             /* '?' for anything else */
+        septets[n++] = g;
+    }
+    return n;
+}
+
+long nl_gsm_number_encode(const char *number, nl_u8 *out, long outsize, int semioctet)
+{
+    char d[32]; int digits = 0, intl = 0, i, octets;
+    const char *p = number;
+    if (*p == '+') { intl = 1; p++; }
+    while (*p && digits < 30) {
+        if (*p >= '0' && *p <= '9') d[digits++] = *p;
+        p++;
+    }
+    octets = (digits + 1) / 2;
+    if (2 + octets > outsize) return NL_GSM_ERR_SPACE;
+    out[0] = (nl_u8)(semioctet ? digits : octets + 1);   /* digit count, or octet count incl TOA */
+    out[1] = (nl_u8)(intl ? 0x91 : 0x81);
+    for (i = 0; i < octets; i++) {
+        int lo = d[2*i] - '0';
+        int hi = (2*i + 1 < digits) ? d[2*i + 1] - '0' : 0x0F;   /* pad odd length with F */
+        out[2 + i] = (nl_u8)((hi << 4) | lo);
+    }
+    return 2 + octets;
+}
