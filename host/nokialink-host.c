@@ -1022,17 +1022,23 @@ static int do_clear_sms(nl_link *l)
 {
     static nl_u16 locs[1200];
     nl_sms_status st;
-    int nloc, deleted = 0, failed = 0;
+    int nloc, deleted = 0, failed = 0, unread;
 
     if (read_sms_status(l, &st) == NL_OK)
         printf("before: phone %u, SIM %u\n", (unsigned)st.phone_used, (unsigned)st.sim_used);
 
-    nloc = one_folder_status(l, NL_SMS_FOLDER_INBOX, locs, 1200);          /* read inbox */
-    deleted += delete_folder_msgs(l, NL_SMS_FOLDER_INBOX, locs, nloc, &failed);
-    nloc = one_folder_status(l, NL_SMS_FOLDER_INBOX_UNREAD, locs, 1200);   /* unread/SIM inbox */
-    deleted += delete_folder_msgs(l, NL_SMS_FOLDER_INBOX_UNREAD, locs, nloc, &failed);
+    /* Delete the READ inbox (folder 0x08). The UNREAD inbox (0xF8) is left
+     * alone: deleting an unread message leaves the phone's "new message"
+     * indicator pointing at nothing (there is no mark-as-read command on the
+     * 7110). Read those on the phone first, then clear again. */
+    nloc = one_folder_status(l, NL_SMS_FOLDER_INBOX, locs, 1200);
+    deleted = delete_folder_msgs(l, NL_SMS_FOLDER_INBOX, locs, nloc, &failed);
+    unread = one_folder_status(l, NL_SMS_FOLDER_INBOX_UNREAD, locs, 1200);
 
-    printf("deleted %d inbox messages (%d failed)\n", deleted, failed);
+    printf("deleted %d read inbox messages (%d failed)\n", deleted, failed);
+    if (unread > 0)
+        printf("left %d unread message%s on the phone (read them there first, then clear again)\n",
+               unread, unread == 1 ? "" : "s");
     if (read_sms_status(l, &st) == NL_OK)
         printf("after:  phone %u, SIM %u\n", (unsigned)st.phone_used, (unsigned)st.sim_used);
     return failed ? 1 : 0;
@@ -1125,6 +1131,94 @@ static int store_match(store_ct *store, int ns, const nl_pbk_entry *e)
         for (i = 0; i < ns; i++)
             if (ct_has_number(&store[i], e->numbers[k].text)) return i;
     return -1;
+}
+
+/* ---- conversations: thread the message archive by correspondent ------
+ * Reads the message-archive TSV (no phone needed) and prints each person's
+ * sent and received messages interleaved in time order. */
+typedef struct {
+    char key[16];     /* number, last 9 digits, for grouping */
+    char who[80];     /* name, or the number */
+    char date[24];
+    int  sent;
+    char text[1024];
+} conv_rec;
+
+static void conv_unescape(const char *in, char *out, long cap)
+{
+    long n = 0;
+    while (*in && n + 1 < cap) {
+        if (*in == '\\' && in[1]) {
+            in++;
+            if (*in == 'n' || *in == 't' || *in == 'r') out[n++] = ' ';  /* keep one line */
+            else out[n++] = *in;
+        } else if (*in == '\n' || *in == '\r') {
+            out[n++] = ' ';
+        } else {
+            out[n++] = *in;
+        }
+        in++;
+    }
+    out[n] = 0;
+}
+
+static void conv_key(const char *number, char *out)
+{
+    char dig[32]; int nd = 0; const char *p;
+    for (p = number; *p; p++) if (*p >= '0' && *p <= '9') { if (nd < 31) dig[nd++] = *p; }
+    dig[nd] = 0;
+    if (nd > 9) strcpy(out, dig + nd - 9); else strcpy(out, dig);
+}
+
+static int do_conversations(const char *path)
+{
+    static conv_rec recs[600]; static char used[600]; static char line[8192];
+    int n = 0, i, j, printed = 0;
+    FILE *f = fopen(path, "r");
+    if (!f) { printf("conversations: cannot open %s\n", path); return 1; }
+
+    while (fgets(line, sizeof line, f) && n < 600) {
+        char *cols[8]; int nc = 1; char *p;
+        if (line[0] == '#' || line[0] == '\n') continue;
+        cols[0] = line;
+        for (p = line; *p && nc < 8; p++) if (*p == '\t') { *p = '\0'; cols[nc++] = p + 1; }
+        if (nc < 8) continue;                       /* fp,folder,dir,number,name,date,parts,text */
+        { char *e = strchr(cols[7], '\n'); if (e) *e = 0; }
+        conv_key(cols[3], recs[n].key);
+        if (recs[n].key[0] == 0) continue;          /* no number to thread on */
+        strncpy(recs[n].who, cols[4][0] ? cols[4] : cols[3], sizeof recs[n].who - 1);
+        recs[n].who[sizeof recs[n].who - 1] = 0;
+        strncpy(recs[n].date, cols[5], sizeof recs[n].date - 1);
+        recs[n].date[sizeof recs[n].date - 1] = 0;
+        recs[n].sent = (strcmp(cols[2], "sent") == 0);
+        conv_unescape(cols[7], recs[n].text, sizeof recs[n].text);
+        n++;
+    }
+    fclose(f);
+
+    for (i = 0; i < n; i++) used[i] = 0;
+    for (i = 0; i < n; i++) {
+        int grp[600], ng = 0, a, b;
+        const char *who = recs[i].who;
+        if (used[i]) continue;
+        for (j = i; j < n; j++)
+            if (!used[j] && strcmp(recs[j].key, recs[i].key) == 0) {
+                used[j] = 1; grp[ng++] = j;
+                if (recs[j].who[0] && !recs[j].sent) who = recs[j].who;  /* prefer the other party's name */
+            }
+        for (a = 1; a < ng; a++)                     /* sort the thread by date */
+            for (b = a; b > 0 && strcmp(recs[grp[b-1]].date, recs[grp[b]].date) > 0; b--)
+                { int t = grp[b-1]; grp[b-1] = grp[b]; grp[b] = t; }
+        printf("\n=== %s (%s) ===\n", who, recs[i].key);
+        for (a = 0; a < ng; a++) {
+            conv_rec *r = &recs[grp[a]];
+            printf("  %-16s %-5s %s\n", r->date[0] ? r->date : "(no time)",
+                   r->sent ? "me:" : "them:", r->text);
+        }
+        printed++;
+    }
+    printf("\n%d conversations, %d messages.\n", printed, n);
+    return 0;
 }
 
 static int entry_is_code(const nl_pbk_entry *e);   /* defined below */
@@ -1398,10 +1492,16 @@ int main(int argc, char **argv)
                         "           archive-contacts <device> <store-folder>\n"
                         "           archive-calls <device> <archive-file>\n"
                         "           archive-calendar <device> <store-folder>\n"
-                        "           send-sms <device> <number> <text>\n");
+                        "           send-sms <device> <number> <text>\n"
+                        "           conversations <archive-file>   (offline, no phone)\n");
         return 2;
     }
     cmd = argv[1];
+
+    /* conversations reads the archive file only; it needs no phone. */
+    if (strcmp(cmd, "conversations") == 0)
+        return do_conversations(argv[2]);
+
     if (posix_port_open(&pp, argv[2]) != 0) {
         fprintf(stderr, "can't open %s: %s\n", argv[2], strerror(errno));
         return 1;
