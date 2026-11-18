@@ -3,7 +3,7 @@
  * the protocol code before the Plus is involved (docs/PLAN.md, Phase 1).
  *
  * Usage: nokialink-host <command> <device> [trace-file]
- *   commands: identify battery signal network clock contacts sms calendar calls sim-info migrate-sim clear-sms status
+ *   commands: identify battery signal network clock contacts sms calendar calls sim-info migrate-sim clear-sms clear-outbox status
  * All read-only: nothing is written to the phone.
  *
  * First worked against a real 7110 (NSE-5, firmware 04.80) on 18 Nov 2026
@@ -987,6 +987,31 @@ static int do_clear_sms(nl_link *l)
     return failed ? 1 : 0;
 }
 
+/* Clear the Outbox (sent messages). They are already in the archive; this
+ * leaves Inbox, Archive and Templates alone. Finds the Outbox by name. */
+static int do_clear_outbox(nl_link *l)
+{
+    nl_sms_folder folders[NL_SMS_MAX_FOLDERS];
+    static nl_u16 locs[1200];
+    nl_sms_status st;
+    int nf, i, nloc, deleted = 0, failed = 0;
+    nl_u8 oid = 0;
+
+    nf = get_folders(l, folders, NL_SMS_MAX_FOLDERS);
+    for (i = 0; i < nf; i++)
+        if (strcmp(folders[i].name, "Outbox") == 0) oid = folders[i].id;
+    if (!oid) { printf("no Outbox folder found; nothing cleared\n"); return 1; }
+
+    if (read_sms_status(l, &st) == NL_OK)
+        printf("before: phone %u, SIM %u\n", (unsigned)st.phone_used, (unsigned)st.sim_used);
+    nloc = one_folder_status(l, oid, locs, 1200);
+    deleted = delete_folder_msgs(l, oid, locs, nloc, &failed);
+    printf("deleted %d Outbox (sent) messages (%d failed)\n", deleted, failed);
+    if (read_sms_status(l, &st) == NL_OK)
+        printf("after:  phone %u, SIM %u\n", (unsigned)st.phone_used, (unsigned)st.sim_used);
+    return failed ? 1 : 0;
+}
+
 /* Collect one register's entries (stopping at the first without a call
  * time, which marks the end) into out[n..]. Returns the new n. */
 static int read_register_entries(nl_link *l, nl_u8 mem, nl_pbk_entry *out, int max, int n)
@@ -1083,7 +1108,7 @@ int main(int argc, char **argv)
 
     if (argc < 3) {
         fprintf(stderr, "usage: nokialink-host <command> <device> [trace-file]\n"
-                        "  commands: identify battery signal network clock contacts sms calendar calls sim-info migrate-sim clear-sms status\n"
+                        "  commands: identify battery signal network clock contacts sms calendar calls sim-info migrate-sim clear-sms clear-outbox status\n"
                         "           archive-sms <device> <archive-file>\n"
                         "           archive-contacts <device> <store-folder>\n"
                         "           archive-calls <device> <archive-file>\n"
@@ -1137,6 +1162,7 @@ int main(int argc, char **argv)
     else if (strcmp(cmd, "sim-info") == 0) bad = do_siminfo(&link);
     else if (strcmp(cmd, "migrate-sim") == 0) bad = do_migrate_sim(&link);
     else if (strcmp(cmd, "clear-sms") == 0) bad = do_clear_sms(&link);
+    else if (strcmp(cmd, "clear-outbox") == 0) bad = do_clear_outbox(&link);
     else if (strcmp(cmd, "archive-sms") == 0) bad = do_archive_sms(&link, argv[3]);
     else if (strcmp(cmd, "archive-contacts") == 0) bad = do_archive_contacts(&link, argv[3]);
     else if (strcmp(cmd, "archive-calls") == 0) bad = do_archive_calls(&link, argv[3]);
