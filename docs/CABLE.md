@@ -57,6 +57,36 @@ computer powers through DTR and RTS (**Doc**: Gammu raises both before
 it talks). Which of pins 1, 6, 8 and 9 the cable really drives is
 **To measure**.
 
+## 2a. The Nokia cable's phone end (the 7110 connector)
+
+The DLR-3P's other end plugs into the 7110's 9-pin bottom connector. The
+DLR-3P is an **FBUS** cable: it uses the phone's FBUS data lines.
+
+| Pin | Name | What it is |
+|---:|---|---|
+| 1 | Charge in | ≤ 8.5 V, 850 mA |
+| 2 | Charge control | PWM |
+| 3 | XMIC | microphone; also headset detect |
+| 4 | Analogue ground | the phone can supply ~3.3 V here to power a DLR-3 cable |
+| 5 | XEAR | earpiece; also accessory detect |
+| 6 | MBUS | 9600 bps, single wire — **not used by NokiaLink** |
+| 7 | **FBUS RX** | data into the phone |
+| 8 | **FBUS TX** | data out of the phone; ~3 V logic, 9600–230,400 bps |
+| 9 | Signal / charge ground | |
+
+(**Unverified**: from hobbyist pinout pages, e.g. nobbi.com, not an
+official service manual. Check with a meter before trusting the numbers.)
+
+**No MBUS.** NokiaLink talks **FBUS only** (pins 7 and 8), at 19,125 then
+114,750 baud. The MBUS line (pin 6) is a separate slow single-wire bus; it
+is never used — there is no MBUS code in NokiaLink and the data path never
+touches that line. The DLR-3P handles the phone connector itself, so the
+Plus adapter (section 3) only ever deals with the computer end above.
+
+Because the phone can power the cable's converter (pin 4), the DLR-3P may
+not need the computer's DTR/RTS power at all — the open question in
+section 5, to settle with a meter once the lead is made.
+
 ## 3. The wiring
 
 | Plus mini-DIN | to | D-9 (PC numbering) | Why |
