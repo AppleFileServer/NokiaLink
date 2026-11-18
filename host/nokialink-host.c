@@ -3,7 +3,7 @@
  * the protocol code before the Plus is involved (docs/PLAN.md, Phase 1).
  *
  * Usage: nokialink-host <command> <device> [trace-file]
- *   commands: identify battery signal network clock contacts sms calendar status
+ *   commands: identify battery signal network clock contacts sms calendar calls status
  * All read-only: nothing is written to the phone.
  *
  * First worked against a real 7110 (NSE-5, firmware 04.80) on 18 Nov 2026
@@ -322,6 +322,57 @@ static int do_calendar(nl_link *l)
     return 0;
 }
 
+/* One call register (dialled/missed/received): read slots until they run
+ * out. Each entry carries a number, maybe a matched name, and the time. */
+static int read_register(nl_link *l, nl_u8 mem)
+{
+    nl_u8 req[32], reply[512]; long rn, len, loc;
+    int err, found = 0, miss = 0;
+    const char *name = nl_pbk_mem_name(mem);
+
+    printf("%s:\n", name);
+    for (loc = 1; loc <= 30 && miss < 3; loc++) {
+        nl_pbk_entry e;
+        rn = nl_pbk_req_read(req, sizeof req, mem, (nl_u16)loc);
+        if (rn < 0) break;
+        err = nl_link_request(l, NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE,
+                              reply, sizeof reply, &len, 2500);
+        if (err == NL_ERR_TIMEOUT && loc == 1)   /* first request can be lost */
+            err = nl_link_request(l, NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE,
+                                  reply, sizeof reply, &len, 2500);
+        if (err != NL_OK) { miss++; continue; }
+        err = nl_pbk_parse_entry(reply, len, (nl_u16)loc, &e);
+        if (err == NL_PBK_ERR_EMPTY) { miss++; continue; }
+        if (err != NL_PBK_OK) { hex("  entry (undecoded)", reply, len); miss++; continue; }
+        /* A real call entry always carries the time of the call; reading
+         * past the end of a register returns a leftover entry without one,
+         * so treat "no time" as the end. */
+        if (!e.has_when) break;
+
+        printf("  [%u]", (unsigned)e.location);
+        if (e.has_when)
+            printf(" %04d-%02d-%02d %02ld:%02ld",
+                   nl_date_year(e.when.date), nl_date_month(e.when.date), nl_date_day(e.when.date),
+                   e.when.secs / 3600, (e.when.secs / 60) % 60);
+        if (e.nnumbers) printf("  %s", e.numbers[0].text);
+        if (e.name[0])  printf("  %s", e.name);
+        printf("\n");
+        found++; miss = 0;
+    }
+    printf("  %d entries\n", found);
+    return 0;
+}
+
+/* The three call registers. */
+static int do_calls(nl_link *l)
+{
+    int bad = 0;
+    bad |= read_register(l, NL_PBK_MEM_DIALLED);
+    bad |= read_register(l, NL_PBK_MEM_MISSED);
+    bad |= read_register(l, NL_PBK_MEM_RECEIVED);
+    return bad;
+}
+
 int main(int argc, char **argv)
 {
     posix_port pp;
@@ -331,7 +382,7 @@ int main(int argc, char **argv)
 
     if (argc < 3) {
         fprintf(stderr, "usage: nokialink-host <command> <device> [trace-file]\n"
-                        "  commands: identify battery signal network clock contacts sms calendar status\n");
+                        "  commands: identify battery signal network clock contacts sms calendar calls status\n");
         return 2;
     }
     cmd = argv[1];
@@ -367,6 +418,7 @@ int main(int argc, char **argv)
     else if (strcmp(cmd, "contacts") == 0) bad = do_contacts(&link);
     else if (strcmp(cmd, "sms")      == 0) bad = do_sms(&link);
     else if (strcmp(cmd, "calendar") == 0) bad = do_calendar(&link);
+    else if (strcmp(cmd, "calls")    == 0) bad = do_calls(&link);
     else if (strcmp(cmd, "status")   == 0) {
         bad |= do_identify(&link);
         bad |= do_battery(&link);
