@@ -81,7 +81,8 @@ cc $CFLAGS -fsanitize=address,undefined \
 "$B/test_wire"
 
 cc $CFLAGS \
-    src/core/fbus.c src/core/link.c \
+    src/core/fbus.c src/core/link.c src/core/nlinfo.c \
+    src/store/nltext.c src/store/nldate.c \
     host/port_posix.c host/nokialink-host.c \
     -o "$B/nokialink-host"
 echo "built $B/nokialink-host"
