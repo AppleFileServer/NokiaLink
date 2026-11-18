@@ -24,6 +24,7 @@
 #include "../src/store/nlctvcard.h"
 #include "../src/store/nlcrc.h"
 #include "../src/store/nllogarc.h"
+#include "../src/store/nlcalvcs.h"
 #include "port_posix.h"
 
 static nl_u8 msg_buf[4096];
@@ -648,44 +649,100 @@ static void print_note(const nl_cal_note *n)
 }
 
 /* List the used note slots (paged), then read each note. */
-static int do_calendar(nl_link *l)
+/* Collect the calendar notes (locations paged, then each note read) into
+ * out[0..], with each note's location in outloc[]. Returns the count. */
+static int read_calendar_notes(nl_link *l, nl_cal_note *out, nl_u16 *outloc, int max)
 {
     nl_u8 req[16], reply[512]; long rn, len;
     nl_u16 total = 0, locs[NL_CAL_MAX_LOCS];
     static nl_u16 all[1024];
-    int nlocs = 0, err, got = 0, nall = 0, i, page;
+    int nlocs = 0, err, nall = 0, got = 0, i, page;
     nl_u16 after = 0;
 
     for (page = 0; page < 32; page++) {
         rn = nl_cal_req_notes_info(req, sizeof req, after);
-        err = nl_link_request(l, NL_CAL_MSG_TYPE, req, rn, NL_CAL_MSG_TYPE,
-                              reply, sizeof reply, &len, 2500);
-        if (err == NL_ERR_TIMEOUT && page == 0)   /* first request can be lost */
-            err = nl_link_request(l, NL_CAL_MSG_TYPE, req, rn, NL_CAL_MSG_TYPE,
-                                  reply, sizeof reply, &len, 2500);
-        if (err != NL_OK) { printf("calendar info: %s\n", error_text(err)); return 1; }
+        err = nl_link_request(l, NL_CAL_MSG_TYPE, req, rn, NL_CAL_MSG_TYPE, reply, sizeof reply, &len, 2500);
+        if (err == NL_ERR_TIMEOUT && page == 0)
+            err = nl_link_request(l, NL_CAL_MSG_TYPE, req, rn, NL_CAL_MSG_TYPE, reply, sizeof reply, &len, 2500);
+        if (err != NL_OK) return 0;
         err = nl_cal_parse_notes_info(reply, len, &total, locs, NL_CAL_MAX_LOCS, &nlocs);
-        if (err == NL_CAL_ERR_EMPTY) { printf("calendar: no notes\n"); return 0; }
-        if (err != NL_OK) { hex("notes-info (undecoded)", reply, len); return 1; }
-        for (i = 0; i < nlocs && nall < (int)(sizeof all / sizeof all[0]); i++)
-            all[nall++] = locs[i];
+        if (err != NL_OK) return 0;   /* NL_CAL_ERR_EMPTY too: no notes */
+        for (i = 0; i < nlocs && nall < (int)(sizeof all / sizeof all[0]); i++) all[nall++] = locs[i];
         if (nlocs == 0 || nall >= (int)total) break;
         after = locs[nlocs - 1];
     }
-    printf("calendar: %u notes\n", (unsigned)total);
-
-    for (i = 0; i < nall; i++) {
-        nl_cal_note note;
+    for (i = 0; i < nall && got < max; i++) {
         rn = nl_cal_req_get_note(req, sizeof req, all[i]);
-        err = nl_link_request(l, NL_CAL_MSG_TYPE, req, rn, NL_CAL_MSG_TYPE,
-                              reply, sizeof reply, &len, 2500);
-        if (err != NL_OK) { printf("  [%u] %s\n", (unsigned)all[i], error_text(err)); continue; }
-        err = nl_cal_parse_note(reply, len, &note);
-        if (err != NL_OK) { hex("  note (undecoded)", reply, len); continue; }
-        print_note(&note);
+        err = nl_link_request(l, NL_CAL_MSG_TYPE, req, rn, NL_CAL_MSG_TYPE, reply, sizeof reply, &len, 2500);
+        if (err != NL_OK) continue;
+        if (nl_cal_parse_note(reply, len, &out[got]) != NL_OK) continue;
+        out[got].location = all[i];
+        outloc[got] = all[i];
         got++;
     }
-    printf("read %d of %u notes\n", got, (unsigned)total);
+    return got;
+}
+
+static int do_calendar(nl_link *l)
+{
+    static nl_cal_note notes[1024]; static nl_u16 nloc[1024];
+    int n, i;
+    n = read_calendar_notes(l, notes, nloc, 1024);
+    printf("calendar: %d notes\n", n);
+    for (i = 0; i < n; i++) print_note(&notes[i]);
+    return 0;
+}
+
+/* Write the calendar notes as vCalendar files into <folder>/Calendar, plus
+ * a Checksums list. Each note is one .vcs file (one VEVENT). */
+static int do_archive_calendar(nl_link *l, const char *folder)
+{
+    static nl_cal_note notes[1024]; static nl_u16 nloc[1024];
+    static char usednames[1024][96];
+    char caldir[1100], path[1300], sumspath[1200];
+    int n, i, written = 0, nused = 0;
+    FILE *cf;
+
+    mkdir(folder, 0777);
+    snprintf(caldir, sizeof caldir, "%s/Calendar", folder);
+    mkdir(caldir, 0777);
+
+    n = read_calendar_notes(l, notes, nloc, 1024);
+
+    snprintf(sumspath, sizeof sumspath, "%s/Checksums", caldir);
+    cf = fopen(sumspath, "w");
+    if (cf) fputs("# NokiaLink Checksums v1\tfile\tcrc32\n", cf);
+
+    for (i = 0; i < n; i++) {
+        char vcs[1024], uid[40], base[96], fname[96], key[320];
+        FILE *vf; long vl; int dupn = 2, j;
+
+        snprintf(key, sizeof key, "%s|%ld|%u", notes[i].text, (long)notes[i].date, (unsigned)nloc[i]);
+        sprintf(uid, "nokialink-cal-%08lx", (unsigned long)nl_crc32(key, (long)strlen(key)));
+
+        vl = nl_calvcs_build(&notes[i], uid, vcs, sizeof vcs);
+        if (vl < 0) { printf("  skipped (too long): %s\n", notes[i].text); continue; }
+
+        safe_base(notes[i].text[0] ? notes[i].text : uid, base, sizeof base);
+        strcpy(fname, base);
+        for (;;) {
+            int clash = 0;
+            for (j = 0; j < nused; j++) if (strcmp(usednames[j], fname) == 0) { clash = 1; break; }
+            if (!clash) break;
+            snprintf(fname, sizeof fname, "%s %d", base, dupn++);
+        }
+        if (nused < 1024) { strncpy(usednames[nused], fname, 95); usednames[nused][95] = 0; nused++; }
+
+        snprintf(path, sizeof path, "%s/%s.vcs", caldir, fname);
+        vf = fopen(path, "w");
+        if (!vf) { printf("  cannot write %s\n", path); continue; }
+        fwrite(vcs, 1, (size_t)vl, vf);
+        fclose(vf);
+        if (cf) fprintf(cf, "%s.vcs\t%08lx\n", fname, (unsigned long)nl_crc32(vcs, vl));
+        written++;
+    }
+    if (cf) fclose(cf);
+    printf("archive-calendar: %d notes -> %s/Calendar (%d written)\n", n, folder, written);
     return 0;
 }
 
@@ -839,7 +896,8 @@ int main(int argc, char **argv)
                         "  commands: identify battery signal network clock contacts sms calendar calls status\n"
                         "           archive-sms <device> <archive-file>\n"
                         "           archive-contacts <device> <store-folder>\n"
-                        "           archive-calls <device> <archive-file>\n");
+                        "           archive-calls <device> <archive-file>\n"
+                        "           archive-calendar <device> <store-folder>\n");
         return 2;
     }
     cmd = argv[1];
@@ -848,10 +906,12 @@ int main(int argc, char **argv)
         return 1;
     }
     if (strcmp(cmd, "archive-sms") == 0 || strcmp(cmd, "archive-contacts") == 0 ||
-        strcmp(cmd, "archive-calls") == 0) {
+        strcmp(cmd, "archive-calls") == 0 || strcmp(cmd, "archive-calendar") == 0) {
+        int wantsfolder = (strcmp(cmd, "archive-contacts") == 0 ||
+                           strcmp(cmd, "archive-calendar") == 0);
         if (argc < 4) {
             fprintf(stderr, "usage: nokialink-host %s <device> %s\n", cmd,
-                    strcmp(cmd, "archive-contacts") == 0 ? "<store-folder>" : "<archive-file>");
+                    wantsfolder ? "<store-folder>" : "<archive-file>");
             posix_port_close(&pp);
             return 2;
         }
@@ -887,6 +947,7 @@ int main(int argc, char **argv)
     else if (strcmp(cmd, "archive-sms") == 0) bad = do_archive_sms(&link, argv[3]);
     else if (strcmp(cmd, "archive-contacts") == 0) bad = do_archive_contacts(&link, argv[3]);
     else if (strcmp(cmd, "archive-calls") == 0) bad = do_archive_calls(&link, argv[3]);
+    else if (strcmp(cmd, "archive-calendar") == 0) bad = do_archive_calendar(&link, argv[3]);
     else if (strcmp(cmd, "status")   == 0) {
         bad |= do_identify(&link);
         bad |= do_battery(&link);
