@@ -28,6 +28,60 @@ long nl_sms_req_read(nl_u8 *out, long outsize, nl_u8 folder, nl_u16 location)
     return 7;
 }
 
+long nl_sms_req_folders(nl_u8 *out, long outsize)
+{
+    if (outsize < 6) return NL_SMS_ERR_SPACE;
+    out[0]=0x00; out[1]=0x01; out[2]=0x00; out[3]=0x7A; out[4]=0x00; out[5]=0x00;
+    return 6;
+}
+
+long nl_sms_req_folder_status(nl_u8 *out, long outsize, nl_u8 folderid)
+{
+    if (outsize < 7) return NL_SMS_ERR_SPACE;
+    out[0]=0x00; out[1]=0x01; out[2]=0x01;   /* N7110 header */
+    out[3]=0x6B; out[4]=folderid; out[5]=0x0F; out[6]=0x01;
+    return 7;
+}
+
+int nl_sms_parse_folders(const nl_u8 *body, long len, nl_sms_folder *out, int max, int *n)
+{
+    int count, i;
+    long cur = 5;
+    *n = 0;
+    if (len < 5) return NL_SMS_ERR_SHORT;
+    if (body[3] != 0x7B) return NL_SMS_ERR_TYPE;
+    count = body[4];
+    for (i = 0; i < count && i < max; i++) {
+        long namestart, chars;
+        long lost = 0;
+        if (cur >= len) return NL_SMS_ERR_SHORT;
+        out[i].id = body[cur++];
+        namestart = cur;
+        while (cur + 1 < len && (body[cur] || body[cur + 1])) cur += 2;
+        chars = (cur - namestart) / 2;
+        nl_ucs2_to_macroman(body + namestart, (int)chars, out[i].name,
+                            (long)sizeof out[i].name, &lost);
+        out[i].name_lost = lost;
+        cur += 2;    /* skip the UCS-2 null terminator */
+        (*n)++;
+    }
+    return NL_SMS_OK;
+}
+
+int nl_sms_parse_folder_status(const nl_u8 *body, long len, nl_u16 *locs, int max, int *n)
+{
+    long count, i;
+    *n = 0;
+    if (len < 6) return NL_SMS_ERR_SHORT;
+    if (body[3] != 0x6C) return NL_SMS_ERR_TYPE;
+    count = (long)body[4] * 256 + body[5];
+    for (i = 0; i < count && *n < max; i++) {
+        if (6 + i * 2 + 1 >= len) break;
+        locs[(*n)++] = (nl_u16)(body[6 + i * 2] * 256 + body[7 + i * 2]);
+    }
+    return NL_SMS_OK;
+}
+
 int nl_sms_parse_status(const nl_u8 *body, long len, nl_sms_status *st)
 {
     if (len < 18) return NL_SMS_ERR_SHORT;

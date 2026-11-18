@@ -75,6 +75,35 @@ static void test_concat(void)
           && strcmp(m.text,"Hello")==0);
 }
 
+static void test_folders(void)
+{
+    nl_u8 b[64]; nl_sms_folder fs[8]; int nf, i;
+    nl_u16 locs[8]; int nl2;
+    i = 0;
+    b[0]=0;b[1]=1;b[2]=0; b[3]=0x7B; b[4]=2;         /* two folders */
+    { nl_u8 *p=b+5; const char *n1="Inbox"; const char *n2="Outbox"; int k;
+      *p++=0x08; for(k=0;n1[k];k++){*p++=0;*p++=(nl_u8)n1[k];} *p++=0;*p++=0;
+      *p++=0x10; for(k=0;n2[k];k++){*p++=0;*p++=(nl_u8)n2[k];} *p++=0;*p++=0;
+      i = (int)(p - b); }
+    current = "folder list";
+    CHECK(nl_sms_parse_folders(b, i, fs, 8, &nf) == NL_SMS_OK);
+    CHECK(nf==2 && fs[0].id==0x08 && strcmp(fs[0].name,"Inbox")==0
+          && fs[1].id==0x10 && strcmp(fs[1].name,"Outbox")==0);
+
+    current = "folder status";
+    memset(b,0,sizeof b); b[3]=0x6C; b[4]=0; b[5]=3;  /* three entries */
+    b[6]=0;b[7]=1; b[8]=0;b[9]=2; b[10]=0;b[11]=5;     /* locations 1,2,5 */
+    CHECK(nl_sms_parse_folder_status(b, 12, locs, 8, &nl2) == NL_SMS_OK);
+    CHECK(nl2==3 && locs[0]==1 && locs[1]==2 && locs[2]==5);
+
+    current = "folder requests";
+    { nl_u8 o[8]; long r;
+      r = nl_sms_req_folders(o, sizeof o);
+      CHECK(r==6 && o[3]==0x7A);
+      r = nl_sms_req_folder_status(o, sizeof o, 0x10);
+      CHECK(r==7 && o[2]==0x01 && o[3]==0x6B && o[4]==0x10 && o[5]==0x0F && o[6]==0x01); }
+}
+
 static void test_requests(void)
 {
     nl_u8 o[8]; long n;
@@ -179,6 +208,7 @@ int main(void)
     test_submit_ucs2();
     test_8bit_and_errors();
     test_concat();
+    test_folders();
     printf("sms: %d checks, %d failures\n", checks, failures);
     return failures != 0;
 }

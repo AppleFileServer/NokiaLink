@@ -226,25 +226,13 @@ typedef struct {
     char       text[4096];
 } joined_msg;
 
-/* Read every inbox part, then join the concatenated ones (same sender and
+/* Join the concatenated messages in msgs[0..n-1] (same sender and
  * reference, in part order) into whole messages. Returns the count. */
-static int read_inbox_joined(nl_link *l, joined_msg *out, int max)
+static int join_msgs(const nl_sms *msgs, int n, joined_msg *out, int max)
 {
-    nl_u8 req[16], reply[512]; long rn, len, loc;
-    static nl_sms msgs[256]; static long locs[256]; static char used[256];
-    int err, misses = 0, n = 0, i, nout = 0;
-
-    for (loc = 1; loc <= 200 && misses < 6 && n < 256; loc++) {
-        rn = nl_sms_req_read(req, sizeof req, NL_SMS_FOLDER_INBOX, (nl_u16)loc);
-        err = nl_link_request(l, NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE,
-                              reply, sizeof reply, &len, 2500);
-        if (err != NL_OK || len < 9 || reply[3] != SMS_READ_OK) { misses++; continue; }
-        if (nl_sms_parse_message(reply, len, &msgs[n]) != NL_SMS_OK) { misses++; continue; }
-        locs[n] = loc; n++; misses = 0;
-    }
-    (void)locs;
-
-    for (i = 0; i < n; i++) used[i] = 0;
+    static char used[512];
+    int i, nout = 0;
+    for (i = 0; i < n && i < 512; i++) used[i] = 0;
     for (i = 0; i < n && nout < max; i++) {
         joined_msg *j = &out[nout];
         if (used[i]) continue;
@@ -286,6 +274,59 @@ static int read_inbox_joined(nl_link *l, joined_msg *out, int max)
     return nout;
 }
 
+/* The folder list. Returns the folder count. */
+static int get_folders(nl_link *l, nl_sms_folder *folders, int max)
+{
+    nl_u8 req[16], reply[512]; long rn, len; int err, nf = 0;
+    rn = nl_sms_req_folders(req, sizeof req);
+    err = nl_link_request(l, NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE, reply, sizeof reply, &len, 2500);
+    if (err == NL_ERR_TIMEOUT)
+        err = nl_link_request(l, NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE, reply, sizeof reply, &len, 2500);
+    if (err != NL_OK || len < 5 || reply[3] != 0x7B) return 0;
+    if (nl_sms_parse_folders(reply, len, folders, max, &nf) != NL_SMS_OK) return 0;
+    return nf;
+}
+
+/* The message locations in one folder. For the Inbox, the read (0x08) and
+ * unread (0xF8) lists are both asked for and merged. Returns the count. */
+static int folder_locations(nl_link *l, nl_u8 folderid, nl_u16 *locs, int max)
+{
+    nl_u8 req[16], reply[512]; long rn, len; int err, n = 0, extra = 0;
+    rn = nl_sms_req_folder_status(req, sizeof req, folderid);
+    err = nl_link_request(l, NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE, reply, sizeof reply, &len, 2500);
+    if (err == NL_ERR_TIMEOUT)
+        err = nl_link_request(l, NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE, reply, sizeof reply, &len, 2500);
+    if (err != NL_OK || len < 6 || reply[3] != 0x6C) return 0;
+    nl_sms_parse_folder_status(reply, len, locs, max, &n);
+    if (folderid == NL_SMS_FOLDER_INBOX) {
+        rn = nl_sms_req_folder_status(req, sizeof req, NL_SMS_FOLDER_INBOX_UNREAD);
+        err = nl_link_request(l, NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE, reply, sizeof reply, &len, 2500);
+        if (err == NL_OK && len >= 6 && reply[3] == 0x6C)
+            nl_sms_parse_folder_status(reply, len, locs + n, max - n, &extra);
+        n += extra;
+    }
+    return n;
+}
+
+/* Read the messages at the given locations in one folder, parts joined. */
+static int read_folder_joined(nl_link *l, nl_u8 folderid, const nl_u16 *locs, int nloc,
+                              joined_msg *out, int max)
+{
+    nl_u8 req[16], reply[512]; long rn, len;
+    static nl_sms msgs[512];
+    int err, n = 0, li;
+    for (li = 0; li < nloc && n < 512; li++) {
+        rn = nl_sms_req_read(req, sizeof req, folderid, locs[li]);
+        err = nl_link_request(l, NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE, reply, sizeof reply, &len, 2500);
+        if (err == NL_ERR_TIMEOUT)
+            err = nl_link_request(l, NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE, reply, sizeof reply, &len, 2500);
+        if (err != NL_OK || len < 9 || reply[3] != SMS_READ_OK) continue;
+        if (nl_sms_parse_message(reply, len, &msgs[n]) != NL_SMS_OK) continue;
+        n++;
+    }
+    return join_msgs(msgs, n, out, max);
+}
+
 static void print_joined(int idx, const joined_msg *j)
 {
     printf("  [%d] %s", idx, nl_sms_pdu_name(j->pdu));
@@ -300,13 +341,15 @@ static void print_joined(int idx, const joined_msg *j)
     if (j->text[0]) printf("       %s\n", j->text);
 }
 
-/* Read the counts, then the inbox messages (parts joined). */
+/* Read the counts, then every folder's messages (parts joined). */
 static int do_sms(nl_link *l)
 {
     nl_u8 req[16], reply[512]; long rn, len;
     nl_sms_status st;
-    static joined_msg out[256];
-    int err, i, n;
+    nl_sms_folder folders[NL_SMS_MAX_FOLDERS];
+    static joined_msg out[512];
+    static nl_u16 locs[1200];
+    int err, i, k, n, nf, total = 0;
 
     rn = nl_sms_req_status(req, sizeof req);
     err = nl_link_request(l, NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE,
@@ -322,23 +365,31 @@ static int do_sms(nl_link *l)
            (unsigned)st.phone_used, (unsigned)st.phone_unread,
            (unsigned)st.sim_used, (unsigned)st.sim_unread, (unsigned)st.sim_size);
 
-    printf("inbox:\n");
-    n = read_inbox_joined(l, out, 256);
-    for (i = 0; i < n; i++) print_joined(i + 1, &out[i]);
-    printf("read %d messages\n", n);
+    nf = get_folders(l, folders, NL_SMS_MAX_FOLDERS);
+    if (nf == 0) { printf("no folders listed\n"); return 1; }
+    for (i = 0; i < nf; i++) {
+        int nloc = folder_locations(l, folders[i].id, locs, 1200);
+        printf("%s (%d):\n", folders[i].name, nloc);
+        n = read_folder_joined(l, folders[i].id, locs, nloc, out, 512);
+        for (k = 0; k < n; k++) print_joined(k + 1, &out[k]);
+        total += n;
+    }
+    printf("read %d messages across %d folders\n", total, nf);
     return 0;
 }
 
-/* Append the inbox to the archive journal, skipping any message already in
- * it (by fingerprint). Only ever adds; never rewrites or deletes. */
+/* Append every folder's messages to the archive journal, skipping any
+ * already in it (by fingerprint). Only ever adds; never rewrites or deletes. */
 #define ARC_MAX_FP 20000
 static int do_archive_sms(nl_link *l, const char *path)
 {
-    static joined_msg out[256];
+    static joined_msg out[512];
+    static nl_u16 locs[1200];
     static char fps[ARC_MAX_FP][9];
     static char line[8192];
+    nl_sms_folder folders[NL_SMS_MAX_FOLDERS];
     FILE *f;
-    int nfps = 0, n, i, added = 0, dup = 0, isnew = 0;
+    int nfps = 0, nf, fi, n, i, added = 0, dup = 0, isnew = 0, total = 0;
 
     /* Load the fingerprints already in the file. */
     f = fopen(path, "r");
@@ -354,43 +405,49 @@ static int do_archive_sms(nl_link *l, const char *path)
         isnew = 1;
     }
 
-    n = read_inbox_joined(l, out, 256);
+    nf = get_folders(l, folders, NL_SMS_MAX_FOLDERS);
+    if (nf == 0) { printf("archive: no folders listed\n"); return 1; }
 
     f = fopen(path, "a");
     if (!f) { printf("archive: cannot open %s for writing\n", path); return 1; }
     if (isnew) fputs(NL_MSGARC_HEADER, f);
 
-    for (i = 0; i < n; i++) {
-        nl_msg_rec r;
-        static char rec[8192];
-        char fphex[9];
-        long rl; int j, seen = 0;
+    for (fi = 0; fi < nf; fi++) {
+        int nloc = folder_locations(l, folders[fi].id, locs, 1200);
+        n = read_folder_joined(l, folders[fi].id, locs, nloc, out, 512);
+        total += n;
+        for (i = 0; i < n; i++) {
+            nl_msg_rec r;
+            static char rec[8192];
+            char fphex[9];
+            long rl; int j, seen = 0;
 
-        memset(&r, 0, sizeof r);
-        r.folder = "Inbox";
-        r.incoming = (out[i].pdu != NL_SMS_SUBMIT);
-        r.number = out[i].number;
-        r.name = "";
-        r.date = out[i].has_time ? out[i].time.date : 0;
-        r.secs = out[i].time.secs;
-        r.has_time = out[i].has_time;
-        r.parts = out[i].parts;
-        r.text = out[i].text;
+            memset(&r, 0, sizeof r);
+            r.folder = folders[fi].name;
+            r.incoming = (out[i].pdu != NL_SMS_SUBMIT);
+            r.number = out[i].number;
+            r.name = "";
+            r.date = out[i].has_time ? out[i].time.date : 0;
+            r.secs = out[i].time.secs;
+            r.has_time = out[i].has_time;
+            r.parts = out[i].parts;
+            r.text = out[i].text;
 
-        sprintf(fphex, "%08lx", (unsigned long)nl_msgarc_fingerprint(&r));
-        for (j = 0; j < nfps; j++)
-            if (strcmp(fps[j], fphex) == 0) { seen = 1; break; }
-        if (seen) { dup++; continue; }
+            sprintf(fphex, "%08lx", (unsigned long)nl_msgarc_fingerprint(&r));
+            for (j = 0; j < nfps; j++)
+                if (strcmp(fps[j], fphex) == 0) { seen = 1; break; }
+            if (seen) { dup++; continue; }
 
-        rl = nl_msgarc_format(&r, rec, sizeof rec);
-        if (rl < 0) { printf("archive: a message was too long, skipped\n"); continue; }
-        fputs(rec, f);
-        if (nfps < ARC_MAX_FP) { strcpy(fps[nfps++], fphex); }  /* guard dups within this run */
-        added++;
+            rl = nl_msgarc_format(&r, rec, sizeof rec);
+            if (rl < 0) { printf("archive: a message was too long, skipped\n"); continue; }
+            fputs(rec, f);
+            if (nfps < ARC_MAX_FP) { strcpy(fps[nfps++], fphex); }  /* guard dups within this run */
+            added++;
+        }
     }
     fclose(f);
-    printf("archive: %d inbox messages; added %d new, %d already present -> %s\n",
-           n, added, dup, path);
+    printf("archive: %d messages across %d folders; added %d new, %d already present -> %s\n",
+           total, nf, added, dup, path);
     return 0;
 }
 

@@ -60,14 +60,35 @@ typedef struct {
     nl_u16 sim_used, sim_unread;
 } nl_sms_status;
 
+#define NL_SMS_MAX_FOLDERS      16
+#define NL_SMS_FOLDER_NAME_MAX  40
+#define NL_SMS_FOLDER_INBOX_UNREAD 0xF8  /* the Inbox's unread messages */
+
+typedef struct {
+    nl_u8 id;                              /* folder id, for status/read requests */
+    char  name[NL_SMS_FOLDER_NAME_MAX];    /* Mac Roman */
+    long  name_lost;
+} nl_sms_folder;
+
 /* ---- Requests ------------------------------------------------------- */
 
 long nl_sms_req_status(nl_u8 *out, long outsize);
 long nl_sms_req_read(nl_u8 *out, long outsize, nl_u8 folder, nl_u16 location);
 
+/* List the message folders, and the message locations within one folder. */
+long nl_sms_req_folders(nl_u8 *out, long outsize);
+long nl_sms_req_folder_status(nl_u8 *out, long outsize, nl_u8 folderid);
+
 /* ---- Replies -------------------------------------------------------- */
 
 int nl_sms_parse_status(const nl_u8 *body, long len, nl_sms_status *st);
+
+/* Decode the folder-list reply (sub 0x7B): each folder's id and name. */
+int nl_sms_parse_folders(const nl_u8 *body, long len, nl_sms_folder *out, int max, int *n);
+
+/* Decode a folder-status reply (sub 0x6C): the message locations in the
+ * folder into locs[0..*n-1]. */
+int nl_sms_parse_folder_status(const nl_u8 *body, long len, nl_u16 *locs, int max, int *n);
 
 /* Decode a stored message into *out (cleared first). Returns NL_SMS_OK,
  * NL_SMS_ERR_TYPE for a kind not handled, or an error. The message body
