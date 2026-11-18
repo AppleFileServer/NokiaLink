@@ -14,6 +14,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <dirent.h>
 #include "../src/core/link.h"
 #include "../src/core/nlinfo.h"
 #include "../src/core/nlpbk.h"
@@ -1012,6 +1013,111 @@ static int do_clear_outbox(nl_link *l)
     return failed ? 1 : 0;
 }
 
+/* ---- Sync dry-run: show what a first contacts sync would change ----- */
+
+typedef struct {
+    char name[80];
+    char nums[6][40];
+    int  nnums;
+    int  nemails;
+    int  archive;   /* 1 if from the Archive list */
+    int  matched;   /* set during the dry-run */
+} store_ct;
+
+/* Load every .vcf in <folder>/<sub> into out[n..]; returns the new n. */
+static int load_store(const char *folder, const char *sub, int archive,
+                      store_ct *out, int max, int n)
+{
+    char path[1200]; DIR *d; struct dirent *e;
+    snprintf(path, sizeof path, "%s/%s", folder, sub);
+    d = opendir(path);
+    if (!d) return n;
+    while ((e = readdir(d)) != 0 && n < max) {
+        char fp[1300], buf[NL_VCARD_MAX]; FILE *f; long got; int i, c;
+        nl_vcard v; store_ct *s;
+        size_t ln = strlen(e->d_name);
+        if (ln < 5 || strcmp(e->d_name + ln - 4, ".vcf") != 0) continue;
+        snprintf(fp, sizeof fp, "%s/%s", path, e->d_name);
+        f = fopen(fp, "r"); if (!f) continue;
+        got = (long)fread(buf, 1, sizeof buf - 1, f); fclose(f);
+        if (got <= 0) continue;
+        if (nl_vcard_load(&v, buf, got) != NL_VC_OK) continue;
+        s = &out[n];
+        s->name[0]=0; s->nnums=0; s->archive=archive; s->matched=0;
+        nl_vcard_get(&v, "FN", 0, s->name, sizeof s->name);
+        s->nemails = nl_vcard_count(&v, "EMAIL");
+        c = nl_vcard_count(&v, "TEL");
+        for (i = 0; i < c && s->nnums < 6; i++)
+            if (nl_vcard_get(&v, "TEL", i, s->nums[s->nnums], sizeof s->nums[0]) > 0)
+                s->nnums++;
+        n++;
+    }
+    closedir(d);
+    return n;
+}
+
+/* Does contact s hold a number matching `number`? */
+static int ct_has_number(const store_ct *s, const char *number)
+{
+    int i;
+    for (i = 0; i < s->nnums; i++)
+        if (nl_number_same(s->nums[i], number)) return 1;
+    return 0;
+}
+
+/* Find the store contact matching a phone entry by number; -1 if none. */
+static int store_match(store_ct *store, int ns, const nl_pbk_entry *e)
+{
+    int i, k;
+    for (k = 0; k < e->nnumbers; k++)
+        for (i = 0; i < ns; i++)
+            if (ct_has_number(&store[i], e->numbers[k].text)) return i;
+    return -1;
+}
+
+static int do_sync_dry(nl_link *l, const char *folder)
+{
+    static nl_pbk_entry ents[300]; static nl_u8 memof[300];
+    static store_ct store[400];
+    int nph, ns = 0, i, mi;
+    int add = 0, moveback = 0, insync = 0, topush = 0;
+
+    nph = read_mem_entries(l, NL_PBK_MEM_ME, ents, memof, 300, 0);
+    ns = load_store(folder, "Main", 0, store, 400, 0);
+    ns = load_store(folder, "Archive", 1, store, 400, ns);
+    printf("DRY RUN - nothing is changed.\n");
+    printf("phone: %d contacts; store: %d Main + Archive cards\n\n", nph, ns);
+
+    printf("Phone contacts NEW to the store -> ADD to Main:\n");
+    for (i = 0; i < nph; i++) {
+        mi = store_match(store, ns, &ents[i]);
+        if (mi < 0) { printf("   + %s\n", ents[i].name[0] ? ents[i].name : "(no name)"); add++; }
+    }
+    if (!add) printf("   (none)\n");
+
+    printf("\nPhone contacts in the ARCHIVE list -> MOVE back to Main:\n");
+    for (i = 0; i < nph; i++) {
+        mi = store_match(store, ns, &ents[i]);
+        if (mi >= 0 && store[mi].archive) { printf("   > %s\n", ents[i].name); store[mi].matched = 1; moveback++; }
+        else if (mi >= 0) { store[mi].matched = 1; insync++; }
+    }
+    if (!moveback) printf("   (none)\n");
+
+    printf("\nStore Main contacts NOT on the phone -> WRITE to the phone:\n");
+    for (i = 0; i < ns; i++) {
+        if (store[i].archive || store[i].matched) continue;
+        printf("   -> %s%s\n", store[i].name, store[i].nemails ? "  (has e-mail the SIM lacked)" : "");
+        topush++;
+    }
+    if (!topush) printf("   (none)\n");
+
+    printf("\nAlready in sync (phone contact matches a Main card): %d\n", insync);
+    printf("\nSummary: %d to add to Main, %d to move Archive->Main, %d to write to the phone, %d unchanged.\n",
+           add, moveback, topush, insync);
+    printf("(Run the real sync to apply. The store stays master; its richer cards win on detail.)\n");
+    return 0;
+}
+
 /* Collect one register's entries (stopping at the first without a call
  * time, which marks the end) into out[n..]. Returns the new n. */
 static int read_register_entries(nl_link *l, nl_u8 mem, nl_pbk_entry *out, int max, int n)
@@ -1121,9 +1227,10 @@ int main(int argc, char **argv)
         return 1;
     }
     if (strcmp(cmd, "archive-sms") == 0 || strcmp(cmd, "archive-contacts") == 0 ||
-        strcmp(cmd, "archive-calls") == 0 || strcmp(cmd, "archive-calendar") == 0) {
+        strcmp(cmd, "archive-calls") == 0 || strcmp(cmd, "archive-calendar") == 0 || strcmp(cmd, "sync-dry") == 0) {
         int wantsfolder = (strcmp(cmd, "archive-contacts") == 0 ||
-                           strcmp(cmd, "archive-calendar") == 0);
+                           strcmp(cmd, "archive-calendar") == 0 ||
+                           strcmp(cmd, "sync-dry") == 0);
         if (argc < 4) {
             fprintf(stderr, "usage: nokialink-host %s <device> %s\n", cmd,
                     wantsfolder ? "<store-folder>" : "<archive-file>");
@@ -1163,6 +1270,7 @@ int main(int argc, char **argv)
     else if (strcmp(cmd, "migrate-sim") == 0) bad = do_migrate_sim(&link);
     else if (strcmp(cmd, "clear-sms") == 0) bad = do_clear_sms(&link);
     else if (strcmp(cmd, "clear-outbox") == 0) bad = do_clear_outbox(&link);
+    else if (strcmp(cmd, "sync-dry") == 0) bad = do_sync_dry(&link, argv[3]);
     else if (strcmp(cmd, "archive-sms") == 0) bad = do_archive_sms(&link, argv[3]);
     else if (strcmp(cmd, "archive-contacts") == 0) bad = do_archive_contacts(&link, argv[3]);
     else if (strcmp(cmd, "archive-calls") == 0) bad = do_archive_calls(&link, argv[3]);
