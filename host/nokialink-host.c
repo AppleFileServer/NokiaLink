@@ -3,7 +3,7 @@
  * the protocol code before the Plus is involved (docs/PLAN.md, Phase 1).
  *
  * Usage: nokialink-host <command> <device> [trace-file]
- *   commands: identify battery signal network clock contacts sms calendar calls sim-info status
+ *   commands: identify battery signal network clock contacts sms calendar calls sim-info migrate-sim status
  * All read-only: nothing is written to the phone.
  *
  * First worked against a real 7110 (NSE-5, firmware 04.80) on 18 Nov 2026
@@ -833,6 +833,97 @@ static int do_siminfo(nl_link *l)
     return 0;
 }
 
+/* A phonebook request with one retry on a lost first reply. */
+static int pbk_req(nl_link *l, const nl_u8 *req, long rn, nl_u8 *reply, long cap, long *len)
+{
+    int e = nl_link_request(l, NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE, reply, cap, len, 3000);
+    if (e == NL_ERR_TIMEOUT)
+        e = nl_link_request(l, NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE, reply, cap, len, 3000);
+    return e;
+}
+
+static int entries_match(const nl_pbk_entry *a, const nl_pbk_entry *b)
+{
+    if (strcmp(a->name, b->name) != 0) return 0;
+    if (a->nnumbers != b->nnumbers) return 0;
+    if (a->nnumbers && strcmp(a->numbers[0].text, b->numbers[0].text) != 0) return 0;
+    return 1;
+}
+
+/* Move every SIM contact into phone memory: copy, read back to verify, then
+ * (only if all verified) delete the SIM originals (SPEC CON-9). */
+static int do_migrate_sim(nl_link *l)
+{
+    static nl_pbk_entry ents[300]; static nl_u8 memof[300];
+    nl_u8 req[256], reply[256]; long rn, len;
+    nl_u16 me_used = 0, me_total = 0;
+    int n, i, err, wrote = 0, verified = 0, cleared = 0;
+
+    /* Safety: phone memory must be empty, so we never overwrite anything. */
+    rn = nl_pbk_req_status(req, sizeof req, NL_PBK_MEM_ME);
+    if (pbk_req(l, req, rn, reply, sizeof reply, &len) == NL_OK &&
+        nl_pbk_parse_status(reply, len, &me_used, &me_total) == NL_PBK_OK) {
+        printf("phone memory: %u used of %u\n", (unsigned)me_used, (unsigned)me_total);
+        if (me_used != 0) {
+            printf("ABORT: phone memory is not empty; migration would overwrite entries. "
+                   "Nothing changed.\n");
+            return 1;
+        }
+    } else {
+        printf("ABORT: could not read phone-memory status. Nothing changed.\n");
+        return 1;
+    }
+
+    n = read_mem_entries(l, NL_PBK_MEM_SIM, ents, memof, 300, 0);
+    printf("SIM holds %d contacts\n", n);
+    if (n == 0) { printf("nothing to migrate.\n"); return 0; }
+
+    /* Phase 1: copy to phone memory, locations 1..n. */
+    for (i = 0; i < n; i++) {
+        rn = nl_pbk_req_write(req, sizeof req, NL_PBK_MEM_ME, (nl_u16)(i + 1), &ents[i]);
+        if (rn < 0) { printf("ABORT: could not build write for '%s'. %d copied.\n", ents[i].name, wrote); return 1; }
+        err = pbk_req(l, req, rn, reply, sizeof reply, &len);
+        if (err != NL_OK || len < 4 || reply[3] != NL_PBK_WRITE_OK) {
+            printf("ABORT: write failed for '%s' (err %d). SIM untouched; %d copied to phone.\n",
+                   ents[i].name, err, wrote);
+            return 1;
+        }
+        wrote++;
+    }
+    printf("copied %d contacts to phone memory\n", wrote);
+
+    /* Phase 2: verify each by reading it back. */
+    for (i = 0; i < n; i++) {
+        nl_pbk_entry rd;
+        rn = nl_pbk_req_read(req, sizeof req, NL_PBK_MEM_ME, (nl_u16)(i + 1));
+        err = pbk_req(l, req, rn, reply, sizeof reply, &len);
+        if (err != NL_OK || nl_pbk_parse_entry(reply, len, (nl_u16)(i + 1), &rd) != NL_PBK_OK
+            || !entries_match(&rd, &ents[i])) {
+            printf("ABORT: verify failed at phone location %d ('%s'). SIM NOT cleared; "
+                   "the phone-memory copies are kept.\n", i + 1, ents[i].name);
+            return 1;
+        }
+        verified++;
+    }
+    printf("verified %d contacts in phone memory\n", verified);
+
+    /* Phase 3: all verified -> clear the SIM originals. */
+    for (i = 0; i < n; i++) {
+        rn = nl_pbk_req_delete(req, sizeof req, NL_PBK_MEM_SIM, ents[i].location);
+        err = pbk_req(l, req, rn, reply, sizeof reply, &len);
+        if (err != NL_OK || len < 4 || reply[3] != NL_PBK_DELETE_OK) {
+            printf("  warning: could not delete SIM location %u ('%s')\n",
+                   (unsigned)ents[i].location, ents[i].name);
+            continue;
+        }
+        cleared++;
+    }
+    printf("cleared %d of %d from the SIM\n", cleared, n);
+    printf("\nDONE. One manual step left (the cable cannot set it):\n");
+    printf("  On the 7110: Names -> Options -> Settings -> Memory in use -> Phone\n");
+    return 0;
+}
+
 /* Collect one register's entries (stopping at the first without a call
  * time, which marks the end) into out[n..]. Returns the new n. */
 static int read_register_entries(nl_link *l, nl_u8 mem, nl_pbk_entry *out, int max, int n)
@@ -929,7 +1020,7 @@ int main(int argc, char **argv)
 
     if (argc < 3) {
         fprintf(stderr, "usage: nokialink-host <command> <device> [trace-file]\n"
-                        "  commands: identify battery signal network clock contacts sms calendar calls sim-info status\n"
+                        "  commands: identify battery signal network clock contacts sms calendar calls sim-info migrate-sim status\n"
                         "           archive-sms <device> <archive-file>\n"
                         "           archive-contacts <device> <store-folder>\n"
                         "           archive-calls <device> <archive-file>\n"
@@ -981,6 +1072,7 @@ int main(int argc, char **argv)
     else if (strcmp(cmd, "calendar") == 0) bad = do_calendar(&link);
     else if (strcmp(cmd, "calls")    == 0) bad = do_calls(&link);
     else if (strcmp(cmd, "sim-info") == 0) bad = do_siminfo(&link);
+    else if (strcmp(cmd, "migrate-sim") == 0) bad = do_migrate_sim(&link);
     else if (strcmp(cmd, "archive-sms") == 0) bad = do_archive_sms(&link, argv[3]);
     else if (strcmp(cmd, "archive-contacts") == 0) bad = do_archive_contacts(&link, argv[3]);
     else if (strcmp(cmd, "archive-calls") == 0) bad = do_archive_calls(&link, argv[3]);
