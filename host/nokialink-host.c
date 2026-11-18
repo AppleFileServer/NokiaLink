@@ -3,7 +3,7 @@
  * the protocol code before the Plus is involved (docs/PLAN.md, Phase 1).
  *
  * Usage: nokialink-host <command> <device> [trace-file]
- *   commands: identify battery signal network clock contacts sms status
+ *   commands: identify battery signal network clock contacts sms calendar status
  * All read-only: nothing is written to the phone.
  *
  * First worked against a real 7110 (NSE-5, firmware 04.80) on 18 Nov 2026
@@ -16,6 +16,7 @@
 #include "../src/core/nlinfo.h"
 #include "../src/core/nlpbk.h"
 #include "../src/core/nlsms.h"
+#include "../src/core/nlcal.h"
 #include "port_posix.h"
 
 static nl_u8 msg_buf[4096];
@@ -261,6 +262,66 @@ static int do_sms(nl_link *l)
     return 0;
 }
 
+static void print_note(const nl_cal_note *n)
+{
+    printf("  [%u] %s", (unsigned)n->location, nl_cal_type_name(n->type));
+    if (n->date)
+        printf("  %04d-%02d-%02d", nl_date_year(n->date), nl_date_month(n->date), nl_date_day(n->date));
+    if (n->type == NL_CAL_MEETING || n->type == NL_CAL_CALL)
+        printf(" %02d:%02d", n->hour, n->minute);
+    if (n->type == NL_CAL_BIRTHDAY && n->birth_year)
+        printf("  (b. %d)", n->birth_year);
+    if (n->recur != NL_REC_NONE)
+        printf("  repeat %s", nl_cal_recur_name(n->recur));
+    if (n->has_alarm)
+        printf("  +alarm");
+    printf("\n");
+    if (n->text[0])   printf("       %s\n", n->text);
+    if (n->number[0]) printf("       %s\n", n->number);
+}
+
+/* List the used note slots (paged), then read each note. */
+static int do_calendar(nl_link *l)
+{
+    nl_u8 req[16], reply[512]; long rn, len;
+    nl_u16 total = 0, locs[NL_CAL_MAX_LOCS];
+    static nl_u16 all[1024];
+    int nlocs = 0, err, got = 0, nall = 0, i, page;
+    nl_u16 after = 0;
+
+    for (page = 0; page < 32; page++) {
+        rn = nl_cal_req_notes_info(req, sizeof req, after);
+        err = nl_link_request(l, NL_CAL_MSG_TYPE, req, rn, NL_CAL_MSG_TYPE,
+                              reply, sizeof reply, &len, 2500);
+        if (err == NL_ERR_TIMEOUT && page == 0)   /* first request can be lost */
+            err = nl_link_request(l, NL_CAL_MSG_TYPE, req, rn, NL_CAL_MSG_TYPE,
+                                  reply, sizeof reply, &len, 2500);
+        if (err != NL_OK) { printf("calendar info: %s\n", error_text(err)); return 1; }
+        err = nl_cal_parse_notes_info(reply, len, &total, locs, NL_CAL_MAX_LOCS, &nlocs);
+        if (err == NL_CAL_ERR_EMPTY) { printf("calendar: no notes\n"); return 0; }
+        if (err != NL_OK) { hex("notes-info (undecoded)", reply, len); return 1; }
+        for (i = 0; i < nlocs && nall < (int)(sizeof all / sizeof all[0]); i++)
+            all[nall++] = locs[i];
+        if (nlocs == 0 || nall >= (int)total) break;
+        after = locs[nlocs - 1];
+    }
+    printf("calendar: %u notes\n", (unsigned)total);
+
+    for (i = 0; i < nall; i++) {
+        nl_cal_note note;
+        rn = nl_cal_req_get_note(req, sizeof req, all[i]);
+        err = nl_link_request(l, NL_CAL_MSG_TYPE, req, rn, NL_CAL_MSG_TYPE,
+                              reply, sizeof reply, &len, 2500);
+        if (err != NL_OK) { printf("  [%u] %s\n", (unsigned)all[i], error_text(err)); continue; }
+        err = nl_cal_parse_note(reply, len, &note);
+        if (err != NL_OK) { hex("  note (undecoded)", reply, len); continue; }
+        print_note(&note);
+        got++;
+    }
+    printf("read %d of %u notes\n", got, (unsigned)total);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     posix_port pp;
@@ -270,7 +331,7 @@ int main(int argc, char **argv)
 
     if (argc < 3) {
         fprintf(stderr, "usage: nokialink-host <command> <device> [trace-file]\n"
-                        "  commands: identify battery signal network clock contacts sms status\n");
+                        "  commands: identify battery signal network clock contacts sms calendar status\n");
         return 2;
     }
     cmd = argv[1];
@@ -305,6 +366,7 @@ int main(int argc, char **argv)
     else if (strcmp(cmd, "clock")    == 0) bad = do_clock(&link);
     else if (strcmp(cmd, "contacts") == 0) bad = do_contacts(&link);
     else if (strcmp(cmd, "sms")      == 0) bad = do_sms(&link);
+    else if (strcmp(cmd, "calendar") == 0) bad = do_calendar(&link);
     else if (strcmp(cmd, "status")   == 0) {
         bad |= do_identify(&link);
         bad |= do_battery(&link);

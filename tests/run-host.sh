@@ -82,7 +82,7 @@ cc $CFLAGS -fsanitize=address,undefined \
 
 cc $CFLAGS \
     src/core/fbus.c src/core/link.c src/core/nlinfo.c src/core/nlpbk.c \
-    src/core/nlsms.c src/core/nlgsm.c \
+    src/core/nlsms.c src/core/nlgsm.c src/core/nlcal.c \
     src/store/nltext.c src/store/nldate.c \
     host/port_posix.c host/nokialink-host.c \
     -o "$B/nokialink-host"
