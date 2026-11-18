@@ -17,6 +17,7 @@
 #include "../src/core/nlpbk.h"
 #include "../src/core/nlsms.h"
 #include "../src/core/nlcal.h"
+#include "../src/store/nlmsgarc.h"
 #include "port_posix.h"
 
 static nl_u8 msg_buf[4096];
@@ -215,35 +216,102 @@ static int do_contacts(nl_link *l)
 
 #define SMS_READ_OK 0x08   /* reply sub for a message; empty slots differ */
 
-static void print_sms_header(long loc, const nl_sms *m)
-{
-    printf("  [%ld] %s", loc, nl_sms_pdu_name(m->pdu));
-    if (m->number[0])
-        printf("  %s %s", m->pdu == NL_SMS_SUBMIT ? "to" : "from", m->number);
-    if (m->has_time)
-        printf("  %04d-%02d-%02d %02ld:%02ld",
-               nl_date_year(m->time.date), nl_date_month(m->time.date),
-               nl_date_day(m->time.date), m->time.secs / 3600, (m->time.secs / 60) % 60);
-    printf("\n");   /* read/unread is taken from the status counts, not per-message */
-}
+/* A whole message after joining its parts, with a buffer for the text. */
+typedef struct {
+    nl_sms_pdu pdu;
+    char       number[NL_SMS_NUM_MAX];
+    int        has_time;
+    nl_stamp   time;
+    int        parts;
+    char       text[4096];
+} joined_msg;
 
-static void print_sms_body(const char *text)
-{
-    if (text[0]) printf("       %s\n", text);
-}
-
-/* Read the message counts, then the inbox messages in turn. */
-static int do_sms(nl_link *l)
+/* Read every inbox part, then join the concatenated ones (same sender and
+ * reference, in part order) into whole messages. Returns the count. */
+static int read_inbox_joined(nl_link *l, joined_msg *out, int max)
 {
     nl_u8 req[16], reply[512]; long rn, len, loc;
-    nl_sms_status st;
     static nl_sms msgs[256]; static long locs[256]; static char used[256];
-    int err, misses = 0, n = 0, i;
+    int err, misses = 0, n = 0, i, nout = 0;
+
+    for (loc = 1; loc <= 200 && misses < 6 && n < 256; loc++) {
+        rn = nl_sms_req_read(req, sizeof req, NL_SMS_FOLDER_INBOX, (nl_u16)loc);
+        err = nl_link_request(l, NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE,
+                              reply, sizeof reply, &len, 2500);
+        if (err != NL_OK || len < 9 || reply[3] != SMS_READ_OK) { misses++; continue; }
+        if (nl_sms_parse_message(reply, len, &msgs[n]) != NL_SMS_OK) { misses++; continue; }
+        locs[n] = loc; n++; misses = 0;
+    }
+    (void)locs;
+
+    for (i = 0; i < n; i++) used[i] = 0;
+    for (i = 0; i < n && nout < max; i++) {
+        joined_msg *j = &out[nout];
+        if (used[i]) continue;
+        if (!msgs[i].concat) {
+            j->pdu = msgs[i].pdu;
+            strncpy(j->number, msgs[i].number, sizeof j->number - 1);
+            j->number[sizeof j->number - 1] = 0;
+            j->has_time = msgs[i].has_time; j->time = msgs[i].time; j->parts = 1;
+            strncpy(j->text, msgs[i].text, sizeof j->text - 1);
+            j->text[sizeof j->text - 1] = 0;
+            used[i] = 1; nout++;
+            continue;
+        }
+        {
+            int ref = msgs[i].concat_ref, total = msgs[i].concat_total;
+            int got = 0, hdr = i, seq, k; long tl = 0;
+            j->text[0] = 0;
+            for (seq = 1; seq <= total; seq++) {
+                for (k = i; k < n; k++) {
+                    const char *t; long m;
+                    if (used[k] || !msgs[k].concat) continue;
+                    if (msgs[k].concat_ref != ref) continue;
+                    if (strcmp(msgs[k].number, msgs[i].number) != 0) continue;
+                    if (msgs[k].concat_seq != seq) continue;
+                    for (t = msgs[k].text, m = 0; t[m] && tl + 1 < (long)sizeof j->text; m++)
+                        j->text[tl++] = t[m];
+                    j->text[tl] = 0;
+                    if (seq == 1) hdr = k;
+                    used[k] = 1; got++; break;
+                }
+            }
+            j->pdu = msgs[hdr].pdu;
+            strncpy(j->number, msgs[hdr].number, sizeof j->number - 1);
+            j->number[sizeof j->number - 1] = 0;
+            j->has_time = msgs[hdr].has_time; j->time = msgs[hdr].time; j->parts = got;
+            nout++;
+        }
+    }
+    return nout;
+}
+
+static void print_joined(int idx, const joined_msg *j)
+{
+    printf("  [%d] %s", idx, nl_sms_pdu_name(j->pdu));
+    if (j->number[0])
+        printf("  %s %s", j->pdu == NL_SMS_SUBMIT ? "to" : "from", j->number);
+    if (j->has_time)
+        printf("  %04d-%02d-%02d %02ld:%02ld",
+               nl_date_year(j->time.date), nl_date_month(j->time.date),
+               nl_date_day(j->time.date), j->time.secs / 3600, (j->time.secs / 60) % 60);
+    if (j->parts > 1) printf("  (%d parts)", j->parts);
+    printf("\n");
+    if (j->text[0]) printf("       %s\n", j->text);
+}
+
+/* Read the counts, then the inbox messages (parts joined). */
+static int do_sms(nl_link *l)
+{
+    nl_u8 req[16], reply[512]; long rn, len;
+    nl_sms_status st;
+    static joined_msg out[256];
+    int err, i, n;
 
     rn = nl_sms_req_status(req, sizeof req);
     err = nl_link_request(l, NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE,
                           reply, sizeof reply, &len, 2500);
-    if (err == NL_ERR_TIMEOUT)   /* first request after start-up is sometimes lost */
+    if (err == NL_ERR_TIMEOUT)
         err = nl_link_request(l, NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE,
                               reply, sizeof reply, &len, 2500);
     if (err != NL_OK) { printf("sms status: %s\n", error_text(err)); return 1; }
@@ -254,54 +322,75 @@ static int do_sms(nl_link *l)
            (unsigned)st.phone_used, (unsigned)st.phone_unread,
            (unsigned)st.sim_used, (unsigned)st.sim_unread, (unsigned)st.sim_size);
 
-    /* Read every part first, then join the concatenated ones so the archive
-     * holds whole messages. */
-    for (loc = 1; loc <= 200 && misses < 6 && n < 256; loc++) {
-        rn = nl_sms_req_read(req, sizeof req, NL_SMS_FOLDER_INBOX, (nl_u16)loc);
-        err = nl_link_request(l, NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE,
-                              reply, sizeof reply, &len, 2500);
-        if (err != NL_OK || len < 9 || reply[3] != SMS_READ_OK) { misses++; continue; }
-        if (nl_sms_parse_message(reply, len, &msgs[n]) != NL_SMS_OK) { misses++; continue; }
-        locs[n] = loc; n++; misses = 0;
+    printf("inbox:\n");
+    n = read_inbox_joined(l, out, 256);
+    for (i = 0; i < n; i++) print_joined(i + 1, &out[i]);
+    printf("read %d messages\n", n);
+    return 0;
+}
+
+/* Append the inbox to the archive journal, skipping any message already in
+ * it (by fingerprint). Only ever adds; never rewrites or deletes. */
+#define ARC_MAX_FP 20000
+static int do_archive_sms(nl_link *l, const char *path)
+{
+    static joined_msg out[256];
+    static char fps[ARC_MAX_FP][9];
+    static char line[8192];
+    FILE *f;
+    int nfps = 0, n, i, added = 0, dup = 0, isnew = 0;
+
+    /* Load the fingerprints already in the file. */
+    f = fopen(path, "r");
+    if (f) {
+        while (fgets(line, sizeof line, f)) {
+            if (line[0] == '#' || line[0] == '\n') continue;
+            if (strlen(line) >= 9 && line[8] == '\t' && nfps < ARC_MAX_FP) {
+                memcpy(fps[nfps], line, 8); fps[nfps][8] = 0; nfps++;
+            }
+        }
+        fclose(f);
+    } else {
+        isnew = 1;
     }
 
-    printf("inbox:\n");
-    for (i = 0; i < n; i++) used[i] = 0;
+    n = read_inbox_joined(l, out, 256);
+
+    f = fopen(path, "a");
+    if (!f) { printf("archive: cannot open %s for writing\n", path); return 1; }
+    if (isnew) fputs(NL_MSGARC_HEADER, f);
+
     for (i = 0; i < n; i++) {
-        if (used[i]) continue;
-        if (!msgs[i].concat) {
-            print_sms_header(locs[i], &msgs[i]);
-            print_sms_body(msgs[i].text);
-            used[i] = 1;
-            continue;
-        }
-        /* Gather the parts: same sender and reference, in part order. */
-        {
-            static char joined[4096];
-            long jl = 0;
-            int ref = msgs[i].concat_ref, total = msgs[i].concat_total;
-            int got = 0, hdr = i, seq, j;
-            joined[0] = 0;
-            for (seq = 1; seq <= total; seq++) {
-                for (j = i; j < n; j++) {
-                    const char *t; long k;
-                    if (used[j] || !msgs[j].concat) continue;
-                    if (msgs[j].concat_ref != ref) continue;
-                    if (strcmp(msgs[j].number, msgs[i].number) != 0) continue;
-                    if (msgs[j].concat_seq != seq) continue;
-                    for (t = msgs[j].text, k = 0; t[k] && jl + 1 < (long)sizeof joined; k++)
-                        joined[jl++] = t[k];
-                    joined[jl] = 0;
-                    if (seq == 1) hdr = j;    /* the first part carries the time */
-                    used[j] = 1; got++; break;
-                }
-            }
-            print_sms_header(locs[hdr], &msgs[hdr]);
-            if (got < total) printf("       [joined %d of %d parts]\n", got, total);
-            print_sms_body(joined);
-        }
+        nl_msg_rec r;
+        static char rec[8192];
+        char fphex[9];
+        long rl; int j, seen = 0;
+
+        memset(&r, 0, sizeof r);
+        r.folder = "Inbox";
+        r.incoming = (out[i].pdu != NL_SMS_SUBMIT);
+        r.number = out[i].number;
+        r.name = "";
+        r.date = out[i].has_time ? out[i].time.date : 0;
+        r.secs = out[i].time.secs;
+        r.has_time = out[i].has_time;
+        r.parts = out[i].parts;
+        r.text = out[i].text;
+
+        sprintf(fphex, "%08lx", (unsigned long)nl_msgarc_fingerprint(&r));
+        for (j = 0; j < nfps; j++)
+            if (strcmp(fps[j], fphex) == 0) { seen = 1; break; }
+        if (seen) { dup++; continue; }
+
+        rl = nl_msgarc_format(&r, rec, sizeof rec);
+        if (rl < 0) { printf("archive: a message was too long, skipped\n"); continue; }
+        fputs(rec, f);
+        if (nfps < ARC_MAX_FP) { strcpy(fps[nfps++], fphex); }  /* guard dups within this run */
+        added++;
     }
-    printf("read %d parts\n", n);
+    fclose(f);
+    printf("archive: %d inbox messages; added %d new, %d already present -> %s\n",
+           n, added, dup, path);
     return 0;
 }
 
@@ -425,7 +514,8 @@ int main(int argc, char **argv)
 
     if (argc < 3) {
         fprintf(stderr, "usage: nokialink-host <command> <device> [trace-file]\n"
-                        "  commands: identify battery signal network clock contacts sms calendar calls status\n");
+                        "  commands: identify battery signal network clock contacts sms calendar calls status\n"
+                        "           archive-sms <device> <archive-file>\n");
         return 2;
     }
     cmd = argv[1];
@@ -433,7 +523,13 @@ int main(int argc, char **argv)
         fprintf(stderr, "can't open %s: %s\n", argv[2], strerror(errno));
         return 1;
     }
-    if (argc > 3) {
+    if (strcmp(cmd, "archive-sms") == 0) {
+        if (argc < 4) {
+            fprintf(stderr, "usage: nokialink-host archive-sms <device> <archive-file>\n");
+            posix_port_close(&pp);
+            return 2;
+        }
+    } else if (argc > 3) {
         pp.trace = fopen(argv[3], "w");
         if (!pp.trace) {
             fprintf(stderr, "can't write %s: %s\n", argv[3], strerror(errno));
@@ -462,6 +558,7 @@ int main(int argc, char **argv)
     else if (strcmp(cmd, "sms")      == 0) bad = do_sms(&link);
     else if (strcmp(cmd, "calendar") == 0) bad = do_calendar(&link);
     else if (strcmp(cmd, "calls")    == 0) bad = do_calls(&link);
+    else if (strcmp(cmd, "archive-sms") == 0) bad = do_archive_sms(&link, argv[3]);
     else if (strcmp(cmd, "status")   == 0) {
         bad |= do_identify(&link);
         bad |= do_battery(&link);
