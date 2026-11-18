@@ -40,40 +40,63 @@ int nl_sms_parse_status(const nl_u8 *body, long len, nl_sms_status *st)
     return NL_SMS_OK;
 }
 
-/* Decode the message text in whichever coding it uses, into Mac Roman. */
+/* Decode the message text in whichever coding it uses, into Mac Roman.
+ * When the message carries a user-data header (udh), the header sits at the
+ * start of the user data and must be skipped: for 7-bit it occupies whole
+ * septets with fill bits so the text stays septet-aligned; for 8-bit/UCS-2
+ * it is a whole number of octets. The header length byte (UDHL) counts the
+ * header after itself, so the header is UDHL+1 octets in all. */
 static int decode_text(const nl_u8 *frame, long flen, const sms_layout *L,
-                       int udl, nl_sms_coding coding, char *out, long outsize, long *lost)
+                       int udl, int udh, nl_sms_coding coding, char *out, long outsize, long *lost)
 {
     long toff = L->text;
+    int udh_oct = 0;
     *lost = 0;
     out[0] = 0;
+    if (udh) {
+        if (toff >= flen) return NL_SMS_ERR_SHORT;
+        udh_oct = frame[toff] + 1;
+    }
     if (coding == NL_SMS_7BIT) {
-        long need = (udl * 7 + 7) / 8;
-        if (toff + need > flen) return NL_SMS_ERR_SHORT;
-        if (nl_gsm7_to_macroman(frame + toff, flen - toff, 0, udl, out, outsize, lost) < 0)
-            return NL_SMS_ERR_SPACE;
-        return NL_SMS_OK;
-    }
-    if (coding == NL_SMS_UCS2) {
-        int chars = udl / 2;
-        if (toff + udl > flen) return NL_SMS_ERR_SHORT;
-        if (nl_ucs2_to_macroman(frame + toff, chars, out, outsize, lost) < 0)
-            return NL_SMS_ERR_SPACE;
-        return NL_SMS_OK;
-    }
-    /* 8-bit: treat each byte as a Latin-1 character (= Unicode 0..255). */
-    {
-        int i;
-        if (toff + udl > flen) return NL_SMS_ERR_SHORT;
-        for (i = 0; i < udl; i++) {
-            nl_u8 be[2]; long one; char c[2];
-            be[0] = 0; be[1] = frame[toff + i];
-            one = nl_ucs2_to_macroman(be, 1, c, sizeof c, lost);
-            if (one < 0 || i + 1 >= outsize) return NL_SMS_ERR_SPACE;
-            out[i] = c[0];
+        int fill = 0, septets = udl;
+        long need;
+        if (udh) {
+            long n = (long)udh_oct * 8;
+            int udh_septets = (int)((n + 6) / 7);   /* septets the header fills */
+            fill = udh_septets * 7 - (int)n;        /* 0..6 padding bits after it */
+            septets = udl - udh_septets;
+            toff += udh_oct;                         /* header is a whole octet count */
         }
-        out[udl] = 0;
+        if (septets < 0) return NL_SMS_ERR_SHORT;
+        need = (septets * 7 + fill + 7) / 8;
+        if (toff + need > flen) return NL_SMS_ERR_SHORT;
+        if (nl_gsm7_to_macroman(frame + toff, flen - toff, fill, septets, out, outsize, lost) < 0)
+            return NL_SMS_ERR_SPACE;
         return NL_SMS_OK;
+    }
+    /* 8-bit and UCS-2: the length is in octets; skip the header octets. */
+    {
+        long bytes = udl;
+        if (udh) { toff += udh_oct; bytes = udl - udh_oct; }
+        if (bytes < 0) return NL_SMS_ERR_SHORT;
+        if (toff + bytes > flen) return NL_SMS_ERR_SHORT;
+        if (coding == NL_SMS_UCS2) {
+            if (nl_ucs2_to_macroman(frame + toff, (int)(bytes / 2), out, outsize, lost) < 0)
+                return NL_SMS_ERR_SPACE;
+            return NL_SMS_OK;
+        }
+        {   /* 8-bit: each byte is a Latin-1 character (Unicode 0..255). */
+            long i;
+            for (i = 0; i < bytes; i++) {
+                nl_u8 be[2]; long one; char c[2];
+                be[0] = 0; be[1] = frame[toff + i];
+                one = nl_ucs2_to_macroman(be, 1, c, sizeof c, lost);
+                if (one < 0 || i + 1 >= outsize) return NL_SMS_ERR_SPACE;
+                out[i] = c[0];
+            }
+            out[bytes] = 0;
+            return NL_SMS_OK;
+        }
     }
 }
 
@@ -129,7 +152,7 @@ int nl_sms_parse_message(const nl_u8 *body, long len, nl_sms *out)
     if (out->pdu == NL_SMS_REPORT) return NL_SMS_OK;   /* no user text */
     if (L->udl >= flen) return NL_SMS_ERR_SHORT;
     udl = frame[L->udl];
-    r = decode_text(frame, flen, L, udl, out->coding, out->text, NL_SMS_TEXT_MAX, &out->text_lost);
+    r = decode_text(frame, flen, L, udl, out->udh, out->coding, out->text, NL_SMS_TEXT_MAX, &out->text_lost);
     return r;
 }
 

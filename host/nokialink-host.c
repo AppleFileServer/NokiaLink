@@ -3,7 +3,7 @@
  * the protocol code before the Plus is involved (docs/PLAN.md, Phase 1).
  *
  * Usage: nokialink-host <command> <device> [trace-file]
- *   commands: identify battery signal network clock contacts status
+ *   commands: identify battery signal network clock contacts sms status
  * All read-only: nothing is written to the phone.
  *
  * First worked against a real 7110 (NSE-5, firmware 04.80) on 18 Nov 2026
@@ -15,6 +15,7 @@
 #include "../src/core/link.h"
 #include "../src/core/nlinfo.h"
 #include "../src/core/nlpbk.h"
+#include "../src/core/nlsms.h"
 #include "port_posix.h"
 
 static nl_u8 msg_buf[4096];
@@ -211,6 +212,55 @@ static int do_contacts(nl_link *l)
     return bad;
 }
 
+#define SMS_READ_OK 0x08   /* reply sub for a message; empty slots differ */
+
+static void print_sms_one(long loc, const nl_sms *m)
+{
+    printf("  [%ld] %s", loc, nl_sms_pdu_name(m->pdu));
+    if (m->number[0])
+        printf("  %s %s", m->pdu == NL_SMS_SUBMIT ? "to" : "from", m->number);
+    if (m->has_time)
+        printf("  %04d-%02d-%02d %02ld:%02ld",
+               nl_date_year(m->time.date), nl_date_month(m->time.date),
+               nl_date_day(m->time.date), m->time.secs / 3600, (m->time.secs / 60) % 60);
+    printf("\n");   /* read/unread is taken from the status counts, not per-message */
+    if (m->text[0]) printf("       %s\n", m->text);
+}
+
+/* Read the message counts, then the inbox messages in turn. */
+static int do_sms(nl_link *l)
+{
+    nl_u8 req[16], reply[512]; long rn, len, loc;
+    nl_sms_status st; nl_sms m;
+    int err, found = 0, misses = 0;
+
+    rn = nl_sms_req_status(req, sizeof req);
+    err = nl_link_request(l, NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE,
+                          reply, sizeof reply, &len, 2500);
+    if (err == NL_ERR_TIMEOUT)   /* first request after start-up is sometimes lost */
+        err = nl_link_request(l, NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE,
+                              reply, sizeof reply, &len, 2500);
+    if (err != NL_OK) { printf("sms status: %s\n", error_text(err)); return 1; }
+    if (nl_sms_parse_status(reply, len, &st) != NL_SMS_OK) {
+        hex("sms status (undecoded)", reply, len); return 1;
+    }
+    printf("messages: phone %u (unread %u), SIM %u (unread %u), SIM size %u\n",
+           (unsigned)st.phone_used, (unsigned)st.phone_unread,
+           (unsigned)st.sim_used, (unsigned)st.sim_unread, (unsigned)st.sim_size);
+
+    printf("inbox:\n");
+    for (loc = 1; loc <= 200 && misses < 6; loc++) {
+        rn = nl_sms_req_read(req, sizeof req, NL_SMS_FOLDER_INBOX, (nl_u16)loc);
+        err = nl_link_request(l, NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE,
+                              reply, sizeof reply, &len, 2500);
+        if (err != NL_OK || len < 9 || reply[3] != SMS_READ_OK) { misses++; continue; }
+        if (nl_sms_parse_message(reply, len, &m) != NL_SMS_OK) { misses++; continue; }
+        print_sms_one(loc, &m); found++; misses = 0;
+    }
+    printf("read %d inbox messages\n", found);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     posix_port pp;
@@ -220,7 +270,7 @@ int main(int argc, char **argv)
 
     if (argc < 3) {
         fprintf(stderr, "usage: nokialink-host <command> <device> [trace-file]\n"
-                        "  commands: identify battery signal network clock contacts status\n");
+                        "  commands: identify battery signal network clock contacts sms status\n");
         return 2;
     }
     cmd = argv[1];
@@ -254,6 +304,7 @@ int main(int argc, char **argv)
     else if (strcmp(cmd, "network")  == 0) bad = do_network(&link);
     else if (strcmp(cmd, "clock")    == 0) bad = do_clock(&link);
     else if (strcmp(cmd, "contacts") == 0) bad = do_contacts(&link);
+    else if (strcmp(cmd, "sms")      == 0) bad = do_sms(&link);
     else if (strcmp(cmd, "status")   == 0) {
         bad |= do_identify(&link);
         bad |= do_battery(&link);
