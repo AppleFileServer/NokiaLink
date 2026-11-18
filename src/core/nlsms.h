@@ -83,6 +83,12 @@ long nl_sms_req_folder_status(nl_u8 *out, long outsize, nl_u8 folderid);
 /* The message-centre (SMSC) at a location (1 is the usual one); type 0x02. */
 long nl_sms_req_smsc(nl_u8 *out, long outsize, nl_u8 location);
 
+/* Delete the message at folderid/location (Phase 2). The phone answers
+ * type 0x14 sub NL_SMS_DELETE_OK1 or _OK2. */
+#define NL_SMS_DELETE_OK1  0x0B
+#define NL_SMS_DELETE_OK2  0x0C
+long nl_sms_req_delete(nl_u8 *out, long outsize, nl_u8 folderid, nl_u16 location);
+
 /* ---- Replies -------------------------------------------------------- */
 
 int nl_sms_parse_status(const nl_u8 *body, long len, nl_sms_status *st);

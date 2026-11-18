@@ -3,7 +3,7 @@
  * the protocol code before the Plus is involved (docs/PLAN.md, Phase 1).
  *
  * Usage: nokialink-host <command> <device> [trace-file]
- *   commands: identify battery signal network clock contacts sms calendar calls sim-info migrate-sim status
+ *   commands: identify battery signal network clock contacts sms calendar calls sim-info migrate-sim clear-sms status
  * All read-only: nothing is written to the phone.
  *
  * First worked against a real 7110 (NSE-5, firmware 04.80) on 18 Nov 2026
@@ -924,6 +924,69 @@ static int do_migrate_sim(nl_link *l)
     return 0;
 }
 
+/* Read one folder's message locations (just this folderid, not merged). */
+static int one_folder_status(nl_link *l, nl_u8 folderid, nl_u16 *locs, int max)
+{
+    nl_u8 req[16], reply[512]; long rn, len; int err, n = 0;
+    rn = nl_sms_req_folder_status(req, sizeof req, folderid);
+    err = nl_link_request(l, NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE, reply, sizeof reply, &len, 2500);
+    if (err == NL_ERR_TIMEOUT)
+        err = nl_link_request(l, NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE, reply, sizeof reply, &len, 2500);
+    if (err != NL_OK || len < 6 || reply[3] != 0x6C) return 0;
+    nl_sms_parse_folder_status(reply, len, locs, max, &n);
+    return n;
+}
+
+static int read_sms_status(nl_link *l, nl_sms_status *st)
+{
+    nl_u8 req[8], reply[64]; long rn, len; int err;
+    rn = nl_sms_req_status(req, sizeof req);
+    err = nl_link_request(l, NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE, reply, sizeof reply, &len, 2500);
+    if (err == NL_ERR_TIMEOUT)
+        err = nl_link_request(l, NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE, reply, sizeof reply, &len, 2500);
+    if (err != NL_OK) return err;
+    return nl_sms_parse_status(reply, len, st) == NL_SMS_OK ? NL_OK : NL_ERR_IO;
+}
+
+static int delete_folder_msgs(nl_link *l, nl_u8 folderid, const nl_u16 *locs, int nloc, int *failed)
+{
+    nl_u8 req[16], reply[128]; long rn, len; int i, del = 0, err;
+    for (i = 0; i < nloc; i++) {
+        rn = nl_sms_req_delete(req, sizeof req, folderid, locs[i]);
+        err = nl_link_request(l, NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE, reply, sizeof reply, &len, 3000);
+        if (err == NL_ERR_TIMEOUT)
+            err = nl_link_request(l, NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE, reply, sizeof reply, &len, 3000);
+        if (err == NL_OK && len >= 4 && (reply[3] == NL_SMS_DELETE_OK1 || reply[3] == NL_SMS_DELETE_OK2))
+            del++;
+        else
+            (*failed)++;
+    }
+    return del;
+}
+
+/* Clear the received (Inbox) texts, which are what the SIM holds. The texts
+ * are already in the archive; this only deletes from the phone/SIM. Sent
+ * messages (Outbox) and Templates are left alone. */
+static int do_clear_sms(nl_link *l)
+{
+    static nl_u16 locs[1200];
+    nl_sms_status st;
+    int nloc, deleted = 0, failed = 0;
+
+    if (read_sms_status(l, &st) == NL_OK)
+        printf("before: phone %u, SIM %u\n", (unsigned)st.phone_used, (unsigned)st.sim_used);
+
+    nloc = one_folder_status(l, NL_SMS_FOLDER_INBOX, locs, 1200);          /* read inbox */
+    deleted += delete_folder_msgs(l, NL_SMS_FOLDER_INBOX, locs, nloc, &failed);
+    nloc = one_folder_status(l, NL_SMS_FOLDER_INBOX_UNREAD, locs, 1200);   /* unread/SIM inbox */
+    deleted += delete_folder_msgs(l, NL_SMS_FOLDER_INBOX_UNREAD, locs, nloc, &failed);
+
+    printf("deleted %d inbox messages (%d failed)\n", deleted, failed);
+    if (read_sms_status(l, &st) == NL_OK)
+        printf("after:  phone %u, SIM %u\n", (unsigned)st.phone_used, (unsigned)st.sim_used);
+    return failed ? 1 : 0;
+}
+
 /* Collect one register's entries (stopping at the first without a call
  * time, which marks the end) into out[n..]. Returns the new n. */
 static int read_register_entries(nl_link *l, nl_u8 mem, nl_pbk_entry *out, int max, int n)
@@ -1020,7 +1083,7 @@ int main(int argc, char **argv)
 
     if (argc < 3) {
         fprintf(stderr, "usage: nokialink-host <command> <device> [trace-file]\n"
-                        "  commands: identify battery signal network clock contacts sms calendar calls sim-info migrate-sim status\n"
+                        "  commands: identify battery signal network clock contacts sms calendar calls sim-info migrate-sim clear-sms status\n"
                         "           archive-sms <device> <archive-file>\n"
                         "           archive-contacts <device> <store-folder>\n"
                         "           archive-calls <device> <archive-file>\n"
@@ -1073,6 +1136,7 @@ int main(int argc, char **argv)
     else if (strcmp(cmd, "calls")    == 0) bad = do_calls(&link);
     else if (strcmp(cmd, "sim-info") == 0) bad = do_siminfo(&link);
     else if (strcmp(cmd, "migrate-sim") == 0) bad = do_migrate_sim(&link);
+    else if (strcmp(cmd, "clear-sms") == 0) bad = do_clear_sms(&link);
     else if (strcmp(cmd, "archive-sms") == 0) bad = do_archive_sms(&link, argv[3]);
     else if (strcmp(cmd, "archive-contacts") == 0) bad = do_archive_contacts(&link, argv[3]);
     else if (strcmp(cmd, "archive-calls") == 0) bad = do_archive_calls(&link, argv[3]);

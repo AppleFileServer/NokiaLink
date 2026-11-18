@@ -90,6 +90,15 @@ long nl_sms_req_smsc(nl_u8 *out, long outsize, nl_u8 location)
     return 6;
 }
 
+long nl_sms_req_delete(nl_u8 *out, long outsize, nl_u8 folderid, nl_u16 location)
+{
+    if (outsize < 8) return NL_SMS_ERR_SPACE;
+    out[0]=0x00; out[1]=0x01; out[2]=0x01;   /* N7110 header */
+    out[3]=0x0A; out[4]=folderid;
+    out[5]=(nl_u8)(location >> 8); out[6]=(nl_u8)location; out[7]=0x01;
+    return 8;
+}
+
 int nl_sms_parse_smsc(const nl_u8 *body, long len,
                       char *number, long numsize, char *name, long namesize)
 {

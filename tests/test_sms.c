@@ -102,6 +102,10 @@ static void test_folders(void)
       CHECK(r==6 && o[3]==0x7A);
       r = nl_sms_req_folder_status(o, sizeof o, 0x10);
       CHECK(r==7 && o[2]==0x01 && o[3]==0x6B && o[4]==0x10 && o[5]==0x0F && o[6]==0x01); }
+
+    current = "delete request";
+    { nl_u8 o[8]; long r = nl_sms_req_delete(o, sizeof o, 0x08, 5);
+      CHECK(r==8 && o[2]==0x01 && o[3]==0x0A && o[4]==0x08 && o[5]==0 && o[6]==5 && o[7]==0x01); }
 }
 
 static void test_smsc(void)
