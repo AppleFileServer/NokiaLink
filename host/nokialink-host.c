@@ -23,6 +23,7 @@
 #include "../src/store/nlnumber.h"
 #include "../src/store/nlctvcard.h"
 #include "../src/store/nlcrc.h"
+#include "../src/store/nllogarc.h"
 #include "port_posix.h"
 
 static nl_u8 msg_buf[4096];
@@ -739,6 +740,93 @@ static int do_calls(nl_link *l)
     return bad;
 }
 
+/* Collect one register's entries (stopping at the first without a call
+ * time, which marks the end) into out[n..]. Returns the new n. */
+static int read_register_entries(nl_link *l, nl_u8 mem, nl_pbk_entry *out, int max, int n)
+{
+    nl_u8 req[32], reply[512]; long rn, len, loc;
+    int err, miss = 0;
+    for (loc = 1; loc <= 30 && miss < 3 && n < max; loc++) {
+        rn = nl_pbk_req_read(req, sizeof req, mem, (nl_u16)loc);
+        if (rn < 0) break;
+        err = nl_link_request(l, NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE, reply, sizeof reply, &len, 2500);
+        if (err == NL_ERR_TIMEOUT && loc == 1)
+            err = nl_link_request(l, NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE, reply, sizeof reply, &len, 2500);
+        if (err != NL_OK) { miss++; continue; }
+        err = nl_pbk_parse_entry(reply, len, (nl_u16)loc, &out[n]);
+        if (err == NL_PBK_ERR_EMPTY) { miss++; continue; }
+        if (err != NL_PBK_OK) { miss++; continue; }
+        if (!out[n].has_when) break;   /* leftover past the end of the register */
+        n++; miss = 0;
+    }
+    return n;
+}
+
+/* Append the three call registers to the call-log journal, skipping any
+ * call already in it (by fingerprint). Only ever adds (SPEC LOG-1/LOG-2). */
+static int do_archive_calls(nl_link *l, const char *path)
+{
+    static const struct { nl_u8 mem; const char *kind; } regs[] = {
+        { NL_PBK_MEM_DIALLED,  "dialled"  },
+        { NL_PBK_MEM_MISSED,   "missed"   },
+        { NL_PBK_MEM_RECEIVED, "received" }
+    };
+    static nl_pbk_entry ents[64];
+    static contact_num cidx[800];
+    static char fps[ARC_MAX_FP][9];
+    static char line[2048];
+    FILE *f;
+    int nfps = 0, isnew = 0, added = 0, dup = 0, total = 0, ncidx, ri, i;
+
+    f = fopen(path, "r");
+    if (f) {
+        while (fgets(line, sizeof line, f)) {
+            if (line[0] == '#' || line[0] == '\n') continue;
+            if (strlen(line) >= 9 && line[8] == '\t' && nfps < ARC_MAX_FP) {
+                memcpy(fps[nfps], line, 8); fps[nfps][8] = 0; nfps++;
+            }
+        }
+        fclose(f);
+    } else {
+        isnew = 1;
+    }
+
+    ncidx = build_contact_index(l, cidx, 800);
+
+    f = fopen(path, "a");
+    if (!f) { printf("call log: cannot open %s for writing\n", path); return 1; }
+    if (isnew) fputs(NL_LOGARC_HEADER, f);
+
+    for (ri = 0; ri < 3; ri++) {
+        int n = read_register_entries(l, regs[ri].mem, ents, 64, 0);
+        total += n;
+        for (i = 0; i < n; i++) {
+            nl_log_rec r;
+            char rec[2048], fphex[9];
+            const char *num = ents[i].nnumbers ? ents[i].numbers[0].text : "";
+            const char *nm = match_name(cidx, ncidx, num);
+            long rl; int j, seen = 0;
+
+            if (!nm[0] && ents[i].name[0]) nm = ents[i].name;   /* fall back to the phone's label */
+            r.kind = regs[ri].kind; r.number = num; r.name = nm;
+            r.date = ents[i].when.date; r.secs = ents[i].when.secs; r.has_time = ents[i].has_when;
+
+            sprintf(fphex, "%08lx", (unsigned long)nl_logarc_fingerprint(&r));
+            for (j = 0; j < nfps; j++) if (strcmp(fps[j], fphex) == 0) { seen = 1; break; }
+            if (seen) { dup++; continue; }
+            rl = nl_logarc_format(&r, rec, sizeof rec);
+            if (rl < 0) continue;
+            fputs(rec, f);
+            if (nfps < ARC_MAX_FP) { strcpy(fps[nfps++], fphex); }
+            added++;
+        }
+    }
+    fclose(f);
+    printf("call log: %d calls; added %d new, %d already present -> %s\n",
+           total, added, dup, path);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     posix_port pp;
@@ -750,7 +838,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "usage: nokialink-host <command> <device> [trace-file]\n"
                         "  commands: identify battery signal network clock contacts sms calendar calls status\n"
                         "           archive-sms <device> <archive-file>\n"
-                        "           archive-contacts <device> <store-folder>\n");
+                        "           archive-contacts <device> <store-folder>\n"
+                        "           archive-calls <device> <archive-file>\n");
         return 2;
     }
     cmd = argv[1];
@@ -758,10 +847,11 @@ int main(int argc, char **argv)
         fprintf(stderr, "can't open %s: %s\n", argv[2], strerror(errno));
         return 1;
     }
-    if (strcmp(cmd, "archive-sms") == 0 || strcmp(cmd, "archive-contacts") == 0) {
+    if (strcmp(cmd, "archive-sms") == 0 || strcmp(cmd, "archive-contacts") == 0 ||
+        strcmp(cmd, "archive-calls") == 0) {
         if (argc < 4) {
             fprintf(stderr, "usage: nokialink-host %s <device> %s\n", cmd,
-                    strcmp(cmd, "archive-sms") == 0 ? "<archive-file>" : "<store-folder>");
+                    strcmp(cmd, "archive-contacts") == 0 ? "<store-folder>" : "<archive-file>");
             posix_port_close(&pp);
             return 2;
         }
@@ -796,6 +886,7 @@ int main(int argc, char **argv)
     else if (strcmp(cmd, "calls")    == 0) bad = do_calls(&link);
     else if (strcmp(cmd, "archive-sms") == 0) bad = do_archive_sms(&link, argv[3]);
     else if (strcmp(cmd, "archive-contacts") == 0) bad = do_archive_contacts(&link, argv[3]);
+    else if (strcmp(cmd, "archive-calls") == 0) bad = do_archive_calls(&link, argv[3]);
     else if (strcmp(cmd, "status")   == 0) {
         bad |= do_identify(&link);
         bad |= do_battery(&link);
