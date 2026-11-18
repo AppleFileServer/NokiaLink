@@ -199,9 +199,44 @@ static void test_lost_chars(void)
     CHECK(strcmp(note.text,"A?Z")==0 && note.text_lost==1);
 }
 
+static void test_write(void)
+{
+    nl_u8 o[128]; long n; nl_cal_note nn;
+    memset(&nn, 0, sizeof nn);
+    nn.type = NL_CAL_REMINDER; nn.date = nl_date_make(2026, 11, 20);
+    strcpy(nn.text, "Pay");       /* 3 chars */
+
+    current = "add reminder frame";
+    n = nl_cal_req_add(o, sizeof o, &nn);
+    CHECK(n > 0 && o[0]==0 && o[1]==1 && o[2]==0 && o[3]==0x40 && o[18]==0x08);
+    CHECK(o[15]==0xFF && o[16]==0xFF);            /* no alarm */
+    CHECK(o[25]==3 && o[26]==0x00);               /* text length, memo marker */
+    CHECK(o[27]==0 && o[28]=='P' && o[29]==0 && o[30]=='a' && o[31]==0 && o[32]=='y');
+    CHECK(o[4]==o[17] && o[4]==(nl_u8)(n-7));
+    /* round-trip the start-time difference back to the date */
+    { long diff = (long)(int)(((unsigned)o[9]<<24)|((unsigned)o[10]<<16)|((unsigned)o[11]<<8)|o[12]);
+      long days = nl_date_to_days(nl_date_make(2030,1,1)) + diff/86400L;
+      CHECK(days == nl_date_to_days(nl_date_make(2006,11,20))); }  /* year-20 */
+
+    current = "birthday unsupported";
+    nn.type = NL_CAL_BIRTHDAY;
+    CHECK(nl_cal_req_add(o, sizeof o, &nn) == NL_CAL_ERR_TYPE);
+
+    current = "delete frame";
+    n = nl_cal_req_delete(o, sizeof o, 7);
+    CHECK(n==6 && o[3]==0x0B && o[4]==0 && o[5]==7);
+
+    current = "add/delete replies";
+    { nl_u8 r[8]; memset(r,0,sizeof r);
+      r[3]=0x41; CHECK(nl_cal_parse_add(r,4)==NL_CAL_OK);
+      r[3]=0x0C; CHECK(nl_cal_parse_delete(r,4)==NL_CAL_OK);
+      r[3]=0x99; CHECK(nl_cal_parse_add(r,4)!=NL_CAL_OK); }
+}
+
 int main(void)
 {
     test_requests();
+    test_write();
     test_notes_info();
     test_meeting();
     test_call();

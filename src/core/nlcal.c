@@ -1,4 +1,6 @@
 /* Calendar notes over the cable (see nlcal.h). */
+#include <string.h>
+
 #include "nlcal.h"
 
 #define HDR0 0x00
@@ -37,6 +39,86 @@ long nl_cal_req_first_free(nl_u8 *out, long outsize)
 {
     long n = req_hdr(out, outsize, 0x31, 0);
     return n < 0 ? n : 4;
+}
+
+/* ---- Writes (Phase 2) ----------------------------------------------- */
+
+/* Write Mac Roman text as UCS-2 big-endian at out; returns the char count. */
+static long cal_put_ucs2(nl_u8 *out, const char *s)
+{
+    long i;
+    for (i = 0; s[i]; i++) {
+        nl_u16 u = nl_macroman_char((nl_u8)s[i]);
+        out[2*i] = (nl_u8)(u >> 8);
+        out[2*i + 1] = (nl_u8)u;
+    }
+    return i;
+}
+
+long nl_cal_req_add(nl_u8 *out, long outsize, const nl_cal_note *n)
+{
+    long length, diff, refdays, notedays;
+    int i, tl;
+
+    if (n->type == NL_CAL_BIRTHDAY) return NL_CAL_ERR_TYPE;   /* not encoded yet */
+    if (outsize < 64) return NL_CAL_ERR_SPACE;
+
+    for (i = 0; i < 29; i++) out[i] = 0;
+    out[0]=0x00; out[1]=0x01; out[2]=0x00;        /* N6110 header */
+    out[3]=0x40;                                   /* add-note */
+    out[13]=0x00; out[14]=0x00; out[15]=0xFF; out[16]=0xFF;   /* no alarm */
+    out[18]=(nl_u8)n->type;
+
+    /* Start time as a seconds difference from 2030-01-01, with the note's
+     * year shifted back 20 (the phone's "method 2" scheme). */
+    refdays  = nl_date_to_days(nl_date_make(2030, 1, 1));
+    notedays = nl_date_to_days(nl_date_make(nl_date_year(n->date) - 20,
+                                            nl_date_month(n->date), nl_date_day(n->date)));
+    diff = (notedays - refdays) * 86400L + (long)n->hour * 3600L + (long)n->minute * 60L;
+    out[9]=(nl_u8)(diff >> 24); out[10]=(nl_u8)(diff >> 16);
+    out[11]=(nl_u8)(diff >> 8); out[12]=(nl_u8)diff;
+
+    if (n->type == NL_CAL_CALL) {
+        int numl = (int)strlen(n->number);
+        tl = (int)strlen(n->text);
+        if (27 + numl*2 + tl*2 + 2 > outsize) return NL_CAL_ERR_SPACE;
+        out[25] = (nl_u8)numl;
+        length = 27 + cal_put_ucs2(out + 27, n->number) * 2;
+        out[26] = (nl_u8)tl;
+        length += cal_put_ucs2(out + length, n->text) * 2;
+    } else {
+        /* meeting (0x01) or reminder/memo (0x08) */
+        tl = (int)strlen(n->text);
+        if (27 + tl*2 + 2 > outsize) return NL_CAL_ERR_SPACE;
+        out[25] = (nl_u8)tl;
+        out[26] = 0x00;
+        length = 27 + cal_put_ucs2(out + 27, n->text) * 2;
+    }
+    out[length++] = 0x00;
+    out[length++] = 0x00;
+    out[4] = out[17] = (nl_u8)(length - 7);
+    return length;
+}
+
+long nl_cal_req_delete(nl_u8 *out, long outsize, nl_u16 location)
+{
+    if (outsize < 6) return NL_CAL_ERR_SPACE;
+    out[0]=0x00; out[1]=0x01; out[2]=0x00;        /* N6110 header */
+    out[3]=0x0B;
+    out[4]=(nl_u8)(location >> 8); out[5]=(nl_u8)location;
+    return 6;
+}
+
+int nl_cal_parse_add(const nl_u8 *body, long len)
+{
+    if (len < 4) return NL_CAL_ERR_SHORT;
+    return body[3] == NL_CAL_ADD_OK ? NL_CAL_OK : NL_CAL_ERR_SUB;
+}
+
+int nl_cal_parse_delete(const nl_u8 *body, long len)
+{
+    if (len < 4) return NL_CAL_ERR_SHORT;
+    return body[3] == NL_CAL_DELETE_OK ? NL_CAL_OK : NL_CAL_ERR_SUB;
 }
 
 /* ---- Replies -------------------------------------------------------- */

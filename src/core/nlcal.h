@@ -82,6 +82,18 @@ long nl_cal_req_get_note(nl_u8 *out, long outsize, nl_u16 location);
 /* Ask for the first free slot. */
 long nl_cal_req_first_free(nl_u8 *out, long outsize);
 
+/* ---- Writes (Phase 2) ----------------------------------------------- *
+ * Add a note (the phone picks the slot) or delete the note at `location`.
+ * Add supports meeting, reminder and call (date, time, text, and a call's
+ * number); alarm, recurrence and birthday are not encoded yet. Replies:
+ * add -> sub 0x41, delete -> sub 0x0C. Return the body length, or an error. */
+#define NL_CAL_ADD_OK     0x41
+#define NL_CAL_DELETE_OK  0x0C
+long nl_cal_req_add(nl_u8 *out, long outsize, const nl_cal_note *note);
+long nl_cal_req_delete(nl_u8 *out, long outsize, nl_u16 location);
+int  nl_cal_parse_add(const nl_u8 *body, long len);
+int  nl_cal_parse_delete(const nl_u8 *body, long len);
+
 /* ---- Replies (decode a received body) ------------------------------- */
 
 /* Decode a notes-info reply (sub 0x3B): the total count into *total, and
