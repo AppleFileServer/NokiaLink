@@ -74,10 +74,11 @@ add_application(NokiaLink
     src/store/nllogarc.c
     src/store/nlctvcard.c
     src/store/nlcalvcs.c
+    src/plus/scc.c
     resources/NokiaLink.r
     ${CMAKE_BINARY_DIR}/version.r
 )
-target_include_directories(NokiaLink PRIVATE ${CMAKE_BINARY_DIR} src/app src/core src/store)
+target_include_directories(NokiaLink PRIVATE ${CMAKE_BINARY_DIR} src/app src/core src/store src/plus)
 
 # The emulator smoke test (tests/run-smoke.sh): with this on, the build
 # runs the modules' checks under Mini vMac instead of the event loop.

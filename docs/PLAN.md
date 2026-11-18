@@ -69,6 +69,15 @@ shown there.
   interrupt table are replaced; the mouse, which shares the chip, is
   left alone. On quitting, the table and the chip are put back as
   found.
+- **Started (18 November 2026):** `src/plus/scc.c` / `scc.h` is a first,
+  **polled** SCC channel-A driver behind the `nl_port` interface (the same
+  interface the Mac host tool's serial code uses), with the 19,125 and
+  114,750 baud set-ups, DTR for cable power, and Ticks-based timing. It is
+  **untested** (needs a real Plus and the adapter lead) and deliberately
+  touches only the data-format/baud/enable registers, never a channel
+  reset or the interrupt registers, so the mouse (which shares channel A)
+  is left alone -- the main thing to confirm on hardware. Interrupt-driven
+  receive is the follow-up if polling drops bytes at 114,750.
 - If interrupts prove too slow at this speed, the fallback is the
   method LocalTalk uses: watch the chip in a tight loop, with
   interrupts held off, for the short time a reply is expected.
