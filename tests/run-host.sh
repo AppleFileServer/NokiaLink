@@ -48,6 +48,11 @@ cc $CFLAGS -fsanitize=address,undefined \
 "$B/test_msgarc"
 
 cc $CFLAGS -fsanitize=address,undefined \
+    src/store/nlctvcard.c src/store/nlvcard.c src/store/nldate.c tests/test_ctvcard.c \
+    -o "$B/test_ctvcard"
+"$B/test_ctvcard"
+
+cc $CFLAGS -fsanitize=address,undefined \
     src/store/nltext.c tests/test_text.c \
     -o "$B/test_text"
 "$B/test_text"
@@ -89,6 +94,7 @@ cc $CFLAGS \
     src/core/fbus.c src/core/link.c src/core/nlinfo.c src/core/nlpbk.c \
     src/core/nlsms.c src/core/nlgsm.c src/core/nlcal.c \
     src/store/nltext.c src/store/nldate.c src/store/nlcrc.c src/store/nlmsgarc.c src/store/nlnumber.c \
+    src/store/nlvcard.c src/store/nlctvcard.c \
     host/port_posix.c host/nokialink-host.c \
     -o "$B/nokialink-host"
 echo "built $B/nokialink-host"

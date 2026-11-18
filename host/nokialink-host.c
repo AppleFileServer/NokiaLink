@@ -12,6 +12,8 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include "../src/core/link.h"
 #include "../src/core/nlinfo.h"
 #include "../src/core/nlpbk.h"
@@ -19,6 +21,8 @@
 #include "../src/core/nlcal.h"
 #include "../src/store/nlmsgarc.h"
 #include "../src/store/nlnumber.h"
+#include "../src/store/nlctvcard.h"
+#include "../src/store/nlcrc.h"
 #include "port_posix.h"
 
 static nl_u8 msg_buf[4096];
@@ -520,6 +524,110 @@ static int do_archive_sms(nl_link *l, const char *path)
     return 0;
 }
 
+/* Read a memory's full contact entries into out[n..], returning the new n. */
+static int read_mem_entries(nl_link *l, nl_u8 mem, nl_pbk_entry *out, nl_u8 *memof,
+                            int max, int n)
+{
+    nl_u8 req[32], reply[1024]; long rn, len, loc;
+    nl_u16 used = 0, total = 0;
+    int err, found = 0;
+
+    rn = nl_pbk_req_status(req, sizeof req, mem);
+    err = nl_link_request(l, NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE, reply, sizeof reply, &len, 2500);
+    if (err == NL_ERR_TIMEOUT)
+        err = nl_link_request(l, NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE, reply, sizeof reply, &len, 2500);
+    if (err != NL_OK) return n;
+    if (nl_pbk_parse_status(reply, len, &used, &total) != NL_PBK_OK) return n;
+    if (total == 0 || total > 2000) total = 2000;
+
+    for (loc = 1; loc <= (long)total && found < (int)used && n < max; loc++) {
+        rn = nl_pbk_req_read(req, sizeof req, mem, (nl_u16)loc);
+        if (rn < 0) continue;
+        err = nl_link_request(l, NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE, reply, sizeof reply, &len, 2500);
+        if (err != NL_OK) continue;
+        err = nl_pbk_parse_entry(reply, len, (nl_u16)loc, &out[n]);
+        if (err == NL_PBK_ERR_EMPTY) continue;
+        if (err != NL_PBK_OK) continue;
+        found++;
+        if (!out[n].name[0] && out[n].nnumbers == 0) continue;   /* blank slot */
+        memof[n] = mem; n++;
+    }
+    return n;
+}
+
+/* A file-name-safe base from a contact name. */
+static void safe_base(const char *fn, char *out, long cap)
+{
+    long n = 0;
+    for (; *fn && n + 1 < cap; fn++) {
+        unsigned char c = (unsigned char)*fn;
+        if (c == '/' || c == ':' || c == '\\' || c < 32) c = '_';
+        out[n++] = (char)c;
+    }
+    if (n == 0 && cap > 1) out[n++] = '_';
+    out[n] = 0;
+}
+
+/* Write the phone's contacts as vCards into <folder>/Main, plus a Checksums
+ * list. All phone contacts go to Main (SPEC CON-5). */
+static int do_archive_contacts(nl_link *l, const char *folder)
+{
+    static nl_pbk_entry ents[600];
+    static nl_u8 memof[600];
+    static char usednames[600][96];
+    char maindir[1100], path[1300], sumspath[1200];
+    int n = 0, i, written = 0, nused = 0;
+    FILE *cf;
+
+    mkdir(folder, 0777);
+    snprintf(maindir, sizeof maindir, "%s/Main", folder);
+    mkdir(maindir, 0777);
+
+    n = read_mem_entries(l, NL_PBK_MEM_ME, ents, memof, 600, n);
+    n = read_mem_entries(l, NL_PBK_MEM_SIM, ents, memof, 600, n);
+
+    snprintf(sumspath, sizeof sumspath, "%s/Checksums", maindir);
+    cf = fopen(sumspath, "w");
+    if (cf) fputs("# NokiaLink Checksums v1\tfile\tcrc32\n", cf);
+
+    for (i = 0; i < n; i++) {
+        nl_vcard v;
+        char uid[32], base[96], fname[96], key[220];
+        FILE *vf;
+        int dupn = 2, j;
+
+        key[0] = 0;
+        strncat(key, ents[i].name, 160);
+        if (ents[i].nnumbers) strncat(key, ents[i].numbers[0].text, 40);
+        sprintf(uid, "nokialink-%08lx", (unsigned long)nl_crc32(key, (long)strlen(key)));
+
+        if (nl_ctvcard_build(&v, &ents[i], "Main", memof[i], 0, 0, uid) != NL_VC_OK) {
+            printf("  skipped (card too long): %s\n", ents[i].name); continue;
+        }
+
+        safe_base(ents[i].name[0] ? ents[i].name : uid, base, sizeof base);
+        strcpy(fname, base);
+        for (;;) {
+            int clash = 0;
+            for (j = 0; j < nused; j++) if (strcmp(usednames[j], fname) == 0) { clash = 1; break; }
+            if (!clash) break;
+            snprintf(fname, sizeof fname, "%s %d", base, dupn++);
+        }
+        if (nused < 600) { strncpy(usednames[nused], fname, 95); usednames[nused][95] = 0; nused++; }
+
+        snprintf(path, sizeof path, "%s/%s.vcf", maindir, fname);
+        vf = fopen(path, "w");
+        if (!vf) { printf("  cannot write %s\n", path); continue; }
+        fwrite(v.text, 1, (size_t)v.len, vf);
+        fclose(vf);
+        if (cf) fprintf(cf, "%s.vcf\t%08lx\n", fname, (unsigned long)nl_crc32(v.text, v.len));
+        written++;
+    }
+    if (cf) fclose(cf);
+    printf("archive-contacts: %d contacts -> %s/Main (%d written)\n", n, folder, written);
+    return 0;
+}
+
 static void print_note(const nl_cal_note *n)
 {
     printf("  [%u] %s", (unsigned)n->location, nl_cal_type_name(n->type));
@@ -641,7 +749,8 @@ int main(int argc, char **argv)
     if (argc < 3) {
         fprintf(stderr, "usage: nokialink-host <command> <device> [trace-file]\n"
                         "  commands: identify battery signal network clock contacts sms calendar calls status\n"
-                        "           archive-sms <device> <archive-file>\n");
+                        "           archive-sms <device> <archive-file>\n"
+                        "           archive-contacts <device> <store-folder>\n");
         return 2;
     }
     cmd = argv[1];
@@ -649,9 +758,10 @@ int main(int argc, char **argv)
         fprintf(stderr, "can't open %s: %s\n", argv[2], strerror(errno));
         return 1;
     }
-    if (strcmp(cmd, "archive-sms") == 0) {
+    if (strcmp(cmd, "archive-sms") == 0 || strcmp(cmd, "archive-contacts") == 0) {
         if (argc < 4) {
-            fprintf(stderr, "usage: nokialink-host archive-sms <device> <archive-file>\n");
+            fprintf(stderr, "usage: nokialink-host %s <device> %s\n", cmd,
+                    strcmp(cmd, "archive-sms") == 0 ? "<archive-file>" : "<store-folder>");
             posix_port_close(&pp);
             return 2;
         }
@@ -685,6 +795,7 @@ int main(int argc, char **argv)
     else if (strcmp(cmd, "calendar") == 0) bad = do_calendar(&link);
     else if (strcmp(cmd, "calls")    == 0) bad = do_calls(&link);
     else if (strcmp(cmd, "archive-sms") == 0) bad = do_archive_sms(&link, argv[3]);
+    else if (strcmp(cmd, "archive-contacts") == 0) bad = do_archive_contacts(&link, argv[3]);
     else if (strcmp(cmd, "status")   == 0) {
         bad |= do_identify(&link);
         bad |= do_battery(&link);
