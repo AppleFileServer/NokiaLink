@@ -36,6 +36,12 @@ typedef struct {
     int           udh;          /* 1 if the message carries a user-data header */
     nl_sms_coding coding;
 
+    /* Concatenation (a long message split into parts), from the UDH. */
+    int           concat;       /* 1 if this is one part of a joined message */
+    int           concat_ref;   /* reference shared by the parts (8- or 16-bit) */
+    int           concat_total; /* how many parts in all */
+    int           concat_seq;   /* which part this is, 1..concat_total */
+
     char          number[NL_SMS_NUM_MAX];  /* sender (deliver) or recipient (submit) */
     long          number_lost;
     char          smsc[NL_SMS_NUM_MAX];    /* service centre */

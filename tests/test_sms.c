@@ -21,6 +21,60 @@ static long pack7(const nl_u8 *s, int n, nl_u8 *out)
     return nbytes;
 }
 
+/* Pack 7-bit septets starting `fill` bits in (for data after a UDH). */
+static long pack7off(const nl_u8 *s, int n, nl_u8 *out, int fill, int cap)
+{
+    int totalbits = n * 7 + fill, nbytes = (totalbits + 7) / 8, i;
+    for (i = 0; i < nbytes && i < cap; i++) out[i] = 0;
+    for (i = 0; i < n; i++) {
+        int bit = fill + i * 7, byte = bit >> 3, shift = bit & 7;
+        out[byte] |= (nl_u8)((s[i] << shift) & 0xFF);
+        if (shift > 1) out[byte + 1] |= (nl_u8)(s[i] >> (8 - shift));
+    }
+    return nbytes;
+}
+
+/* A 7-bit DELIVER carrying a concatenation header (one part of a long
+ * message): the header must be reported and skipped, leaving just the text
+ * septet-aligned past the fill bits. */
+static void test_concat(void)
+{
+    nl_u8 b[96]; nl_u8 *f; nl_sms m; int r, i;
+    const char *txt = "World";    /* this part's text */
+    nl_u8 sept[8];
+    long tn;
+    memset(b, 0, sizeof b);
+    b[4] = 0x01; f = b + 9;
+    f[0] = 0;                     /* empty SMSC */
+    f[12] = 0x40;                 /* deliver + UDH */
+    f[14] = 0x00;                 /* 7-bit */
+    f[16] = 0;                    /* empty sender */
+    f[28]=0x62; f[29]=0x11; f[30]=0x71; f[31]=0x41; f[32]=0x03; f[33]=0x54; f[34]=0x40;
+    /* user data: UDH (6 octets) then text at a 1-bit fill */
+    f[35] = 0x05;                 /* UDHL */
+    f[36] = 0x00; f[37] = 0x03;   /* IEI concat-8, length 3 */
+    f[38] = 0xAB;                 /* reference */
+    f[39] = 0x03;                 /* total parts */
+    f[40] = 0x02;                 /* this is part 2 */
+    for (i = 0; i < 5; i++) sept[i] = (nl_u8)txt[i];
+    tn = pack7off(sept, 5, f + 41, 1, (int)(sizeof b - 9 - 41));
+    f[15] = (nl_u8)(7 + 5);       /* UDL septets: 7 for the header + 5 text */
+
+    current = "concat decode";
+    r = nl_sms_parse_message(b, 9 + 41 + tn, &m);
+    CHECK(r == NL_SMS_OK && m.udh && m.coding == NL_SMS_7BIT);
+    CHECK(m.concat && m.concat_ref == 0xAB && m.concat_total == 3 && m.concat_seq == 2);
+    CHECK(strcmp(m.text, "World") == 0 && m.text_lost == 0);
+
+    current = "no concat without udh";
+    memset(b, 0, sizeof b); b[4]=0x01; f=b+9;
+    f[0]=0; f[12]=0x00; f[14]=0x00; f[16]=0; f[15]=5;
+    f[28]=0x62; f[29]=0x11; f[30]=0x71; f[31]=0x41; f[32]=0x03; f[33]=0x54; f[34]=0x40;
+    { nl_u8 s2[8]; for(i=0;i<5;i++) s2[i]=(nl_u8)"Hello"[i]; tn=pack7(s2,5,f+35); }
+    CHECK(nl_sms_parse_message(b, 9+35+tn, &m)==NL_SMS_OK && !m.udh && !m.concat
+          && strcmp(m.text,"Hello")==0);
+}
+
 static void test_requests(void)
 {
     nl_u8 o[8]; long n;
@@ -124,6 +178,7 @@ int main(void)
     test_deliver();
     test_submit_ucs2();
     test_8bit_and_errors();
+    test_concat();
     printf("sms: %d checks, %d failures\n", checks, failures);
     return failures != 0;
 }

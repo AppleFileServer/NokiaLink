@@ -100,6 +100,31 @@ static int decode_text(const nl_u8 *frame, long flen, const sms_layout *L,
     }
 }
 
+/* Read the concatenation element from the user-data header at frame+toff
+ * (which begins with the header length UDHL). Concatenation is IEI 0x00 (an
+ * 8-bit reference) or 0x08 (16-bit); other elements are skipped. */
+static void parse_concat_udh(const nl_u8 *frame, long flen, long toff, nl_sms *out)
+{
+    long udhl, p, end;
+    if (toff >= flen) return;
+    udhl = frame[toff];
+    p = toff + 1;
+    end = toff + 1 + udhl;
+    if (end > flen) end = flen;
+    while (p + 2 <= end) {
+        int iei = frame[p], iedl = frame[p + 1];
+        if (p + 2 + iedl > end) break;
+        if (iei == 0x00 && iedl == 3) {
+            out->concat = 1; out->concat_ref = frame[p + 2];
+            out->concat_total = frame[p + 3]; out->concat_seq = frame[p + 4];
+        } else if (iei == 0x08 && iedl == 4) {
+            out->concat = 1; out->concat_ref = (frame[p + 2] << 8) | frame[p + 3];
+            out->concat_total = frame[p + 4]; out->concat_seq = frame[p + 5];
+        }
+        p += 2 + iedl;
+    }
+}
+
 int nl_sms_parse_message(const nl_u8 *body, long len, nl_sms *out)
 {
     const nl_u8 *frame;
@@ -111,6 +136,7 @@ int nl_sms_parse_message(const nl_u8 *body, long len, nl_sms *out)
     out->text[0] = 0; out->text_lost = 0;
     out->has_time = 0; out->tz_quarters = 0; out->udh = 0;
     out->time.date = 0; out->time.secs = 0;
+    out->concat = 0; out->concat_ref = 0; out->concat_total = 0; out->concat_seq = 0;
 
     if (len < 9 + 13) return NL_SMS_ERR_SHORT;
     out->state = body[4];
@@ -125,6 +151,8 @@ int nl_sms_parse_message(const nl_u8 *body, long len, nl_sms *out)
     case 0x02: out->pdu = NL_SMS_REPORT;  L = &LAY_DELIVER; break;
     default:   return NL_SMS_ERR_TYPE;
     }
+
+    if (out->udh) parse_concat_udh(frame, flen, L->text, out);
 
     dcs = frame[L->dcs];
     switch ((dcs >> 2) & 0x03) {
