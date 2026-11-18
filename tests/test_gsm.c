@@ -106,8 +106,15 @@ static void test_number(void)
     n = nl_gsm_number(p, 5, 1, out, sizeof out);
     CHECK(n==5 && strcmp(out,"12345")==0);
 
+    current = "alphanumeric sender";
+    /* TOA 0xD0, 13 semi-octets, GSM 7-bit "Resurva" (real 7110 bytes) */
+    p[0]=0x0D; p[1]=0xD0;
+    p[2]=0xD2; p[3]=0xF2; p[4]=0xBC; p[5]=0x2E; p[6]=0xB7; p[7]=0x87; p[8]=0x01;
+    n = nl_gsm_number(p, 9, 1, out, sizeof out);
+    CHECK(n==7 && strcmp(out,"Resurva")==0);
+
     current = "bad toa";
-    p[1]=0x11;                              /* top bit clear -> invalid */
+    p[0]=5; p[1]=0x11;                      /* top bit clear -> invalid */
     CHECK(nl_gsm_number(p, 5, 1, out, sizeof out) == NL_GSM_ERR_BADNUM);
 
     current = "short";

@@ -124,6 +124,18 @@ long nl_gsm_number(const nl_u8 *p, long avail, int semioctet,
     if ((toa & 0x80) == 0) return NL_GSM_ERR_BADNUM;   /* top bit must be set */
     international = ((toa & 0x70) == 0x10);
 
+    /* An alphanumeric address (type-of-number 0x50, e.g. a service name like
+     * "Resurva") is not digits but GSM 7-bit packed text: the length is in
+     * semi-octets, so the text is field_len*4/7 characters. */
+    if (semioctet && (toa & 0x70) == 0x50) {
+        long oct = (field_len + 1) / 2, r, lost = 0;
+        int chars = (int)((long)field_len * 4 / 7);
+        if (2 + oct > avail) return NL_GSM_ERR_SHORT;
+        r = nl_gsm7_to_macroman(p + 2, oct, 0, chars, out, outsize, &lost);
+        if (r < 0) return NL_GSM_ERR_SPACE;
+        return r;
+    }
+
     if (semioctet) { digits = field_len; octets = (field_len + 1) / 2; }
     else           { octets = field_len - 1; digits = (int)(octets * 2); }
     if (octets < 0 || 2 + octets > avail) return NL_GSM_ERR_SHORT;
