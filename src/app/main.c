@@ -20,7 +20,8 @@
 #include "version.h"
 #include "nlinfo.h"
 #include "nlpbk.h"
-#include "contactswin.h"
+#include "listwin.h"
+#include "nlsms.h"
 #ifdef NOKIALINK_SMOKE
 #include "smoke.h"
 #endif
@@ -165,8 +166,8 @@ enum {
     kAppleMenu = 128, kAboutItem = 1,
     kFileMenu = 129, kQuitItem = 1,
     kEditMenu = 130,
-    kViewMenu = 131, kContactsItem = 1,
-    kPhoneWindow = 128,
+    kViewMenu = 131, kContactsItem = 1, kMessagesItem = 2,
+    kPhoneWindow = 128, kContactsWindow = 129, kMessagesWindow = 130,
     kAboutAlert = 128
 };
 
@@ -198,19 +199,22 @@ static long build_pbk_reply(nl_u8 *b, long cap, const char *name, nl_u8 ntype, c
     return off;
 }
 
+/* The list windows (Contacts, Messages); more can be added the same way. */
+static nl_listwin gContacts, gMessages;
+
 static void add_entry_row(const nl_pbk_entry *e)
 {
     char row[96];
     strcpy(row, e->name);
     if (e->nnumbers) { strcat(row, "  "); strcat(row, e->numbers[0].text); }
-    ContactsWin_AddRow(row);
+    listwin_add(&gContacts, row);
 }
 
 /* Canned path (the normal build): decode each reply body straight away. */
 static void BuildContacts(void)
 {
     nl_u8 b[128]; nl_pbk_entry e; long n; int i;
-    ContactsWin_Clear();
+    listwin_clear(&gContacts);
     for (i = 0; i < kSampleN; i++) {
         n = build_pbk_reply(b, sizeof b, kSample[i].name, kSample[i].ntype, kSample[i].num);
         if (nl_pbk_parse_entry(b, n, (nl_u16)(i+1), &e) == NL_PBK_OK)
@@ -232,7 +236,7 @@ static void BuildContactsViaLink(void)
     nl_u8 req[32], reply[256]; long rn, len, n; int i;
     nl_pbk_entry e; fp_reply r;
 
-    ContactsWin_Clear();
+    listwin_clear(&gContacts);
     fp_init(&gFakeC);
     for (i = 0; i < kSampleN && i < 8; i++) {
         n = build_pbk_reply(gPbkBody[i], (long)sizeof gPbkBody[i],
@@ -255,6 +259,20 @@ static void BuildContactsViaLink(void)
     (void)BuildContacts;
 }
 #endif
+
+/* Fill the Messages window. Sample rows for now (all fictional -- this is a
+ * public repo); the real list comes from the SMS read once the serial link
+ * to the phone is live, decoded by nlsms as the host tool already does. */
+static void BuildMessages(void)
+{
+    listwin_clear(&gMessages);
+    listwin_add(&gMessages, "Ada Lovelace     See you at the lecture at 3");
+    listwin_add(&gMessages, "Alan Turing      Bring the papers tomorrow x");
+    listwin_add(&gMessages, "me > Grace       On my way, five minutes");
+    listwin_add(&gMessages, "Katherine J.     Numbers check out, go for launch");
+    listwin_add(&gMessages, "me > Edsger      Lunch at one?");
+    (void)nl_sms_pdu_name;   /* nlsms is linked in for the real read later */
+}
 
 /* The stack: the Toolbox's own calls and interrupts come on top of what
    NokiaLink uses. Set before the heap is first grown. */
@@ -317,8 +335,8 @@ static void DoMenu(long choice)
         SystemEdit(item - 1);   /* a desk accessory's, if one is in front */
         break;
     case kViewMenu:
-        if (item == kContactsItem)
-            ContactsWin_Show();
+        if (item == kContactsItem) listwin_show(&gContacts);
+        else if (item == kMessagesItem) listwin_show(&gMessages);
         break;
     }
     HiliteMenu(0);
@@ -349,8 +367,10 @@ static void HandleEvent(EventRecord *event)
         case inContent:
             if (window != FrontWindow())
                 SelectWindow(window);
-            else if (window == ContactsWin_Window())
-                ContactsWin_Click(event);
+            else if (listwin_owns(&gContacts, window))
+                listwin_click(&gContacts, event);
+            else if (listwin_owns(&gMessages, window))
+                listwin_click(&gMessages, event);
             break;
         }
         break;
@@ -365,14 +385,18 @@ static void HandleEvent(EventRecord *event)
             BeginUpdate(window);
             DrawPhoneWindow();
             EndUpdate(window);
-        } else if (window == ContactsWin_Window()) {
-            ContactsWin_Update();
+        } else if (listwin_owns(&gContacts, window)) {
+            listwin_update(&gContacts);
+        } else if (listwin_owns(&gMessages, window)) {
+            listwin_update(&gMessages);
         }
         break;
     case activateEvt:
         window = (WindowPtr)event->message;
-        if (window == ContactsWin_Window())
-            ContactsWin_Activate((event->modifiers & activeFlag) != 0);
+        if (listwin_owns(&gContacts, window))
+            listwin_activate(&gContacts, (event->modifiers & activeFlag) != 0);
+        else if (listwin_owns(&gMessages, window))
+            listwin_activate(&gMessages, (event->modifiers & activeFlag) != 0);
         break;
     }
 }
@@ -403,13 +427,15 @@ static void Init(void)
     BuildSampleStatus();
 #endif
     gPhoneWindow = GetNewWindow(kPhoneWindow, nil, (WindowPtr)-1L);
-    ContactsWin_Create();
+    listwin_create(&gContacts, kContactsWindow);
+    listwin_create(&gMessages, kMessagesWindow);
 #ifdef NOKIALINK_FAKEPHONE
     BuildContactsViaLink();
 #else
     BuildContacts();
 #endif
-    ContactsWin_Show();   /* open it at startup so the list is visible */
+    BuildMessages();
+    listwin_show(&gContacts);   /* open Contacts at startup; Messages via the View menu */
 }
 
 int main(void)

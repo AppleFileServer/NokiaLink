@@ -52,7 +52,7 @@ configure_file(resources/version.r.in ${CMAKE_BINARY_DIR}/version.r @ONLY)
 add_application(NokiaLink
     CREATOR "NkLk"
     src/app/main.c
-    src/app/contactswin.c
+    src/app/listwin.c
     src/core/fbus.c
     src/core/link.c
     src/core/nlcal.c

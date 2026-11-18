@@ -75,6 +75,7 @@ resource 'MENU' (131) {
     "View";
     {
         "Contacts", noIcon, noKey, noMark, plain;
+        "Messages", noIcon, noKey, noMark, plain;
     }
 };
 
@@ -93,6 +94,13 @@ resource 'WIND' (128) {
 resource 'WIND' (129) {
     {70, 60, 300, 320},
     noGrowDocProc, invisible, goAway, 0, "Contacts",
+    noAutoCenter
+};
+
+/* The Messages window: a scrolling list. */
+resource 'WIND' (130) {
+    {86, 92, 300, 436},
+    noGrowDocProc, invisible, goAway, 0, "Messages",
     noAutoCenter
 };
 
