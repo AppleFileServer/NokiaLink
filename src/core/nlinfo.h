@@ -54,6 +54,10 @@ long nl_info_req_signal(nl_u8 *out, long outsize);
 long nl_info_req_network(nl_u8 *out, long outsize);
 long nl_info_req_clock(nl_u8 *out, long outsize);
 
+/* Set the phone's clock (type NL_INFO_TYPE_CLOCK). Reply checked with
+ * nl_info_parse_set_clock. */
+long nl_info_req_set_clock(nl_u8 *out, long outsize, nl_date date, long secs);
+
 /* ---- Replies -------------------------------------------------------- */
 int nl_info_parse_identify(const nl_u8 *body, long len, nl_info_ident *out);
 int nl_info_parse_imei(const nl_u8 *body, long len, char *out, long outsize);
@@ -61,5 +65,8 @@ int nl_info_parse_battery(const nl_u8 *body, long len, int *percent);
 int nl_info_parse_signal(const nl_u8 *body, long len, int *percent);
 int nl_info_parse_network(const nl_u8 *body, long len, nl_info_network *out);
 int nl_info_parse_clock(const nl_u8 *body, long len, nl_stamp *out);
+
+/* Returns NL_INFO_OK if the set-clock reply (sub 0x61) says it succeeded. */
+int nl_info_parse_set_clock(const nl_u8 *body, long len);
 
 #endif

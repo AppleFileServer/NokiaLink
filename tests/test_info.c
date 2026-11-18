@@ -107,6 +107,21 @@ static void test_clock(void)
     CHECK(nl_info_parse_clock(b,10,&st)==NL_INFO_ERR_SHORT);
 }
 
+static void test_set_clock(void)
+{
+    nl_u8 o[16]; long n; nl_u8 ok[8], bad[8];
+    current = "set-clock request";
+    n = nl_info_req_set_clock(o, sizeof o, nl_date_make(2026, 11, 18), 22L*3600 + 42*60 + 5);
+    CHECK(n == 14 && o[3]==0x60 && o[4]==0x01 && o[5]==0x01 && o[6]==0x07);
+    CHECK(o[7]==(2026>>8) && o[8]==(2026&0xFF) && o[9]==11 && o[10]==18 && o[11]==22 && o[12]==42 && o[13]==0x00);
+    current = "set-clock reply ok";
+    memset(ok,0,sizeof ok); ok[3]=0x61; ok[4]=0x01;
+    CHECK(nl_info_parse_set_clock(ok, 5) == NL_INFO_OK);
+    current = "set-clock reply fail";
+    memset(bad,0,sizeof bad); bad[3]=0x61; bad[4]=0x00;
+    CHECK(nl_info_parse_set_clock(bad, 5) != NL_INFO_OK);
+}
+
 int main(void)
 {
     test_requests();
@@ -115,6 +130,7 @@ int main(void)
     test_battery_signal();
     test_network();
     test_clock();
+    test_set_clock();
     printf("info: %d checks, %d failures\n", checks, failures);
     return failures != 0;
 }

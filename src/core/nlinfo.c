@@ -29,6 +29,26 @@ long nl_info_req_signal(nl_u8 *out, long outsize)  { return body4(out, outsize, 
 long nl_info_req_network(nl_u8 *out, long outsize) { return body4(out, outsize, 0x70); }
 long nl_info_req_clock(nl_u8 *out, long outsize)   { return body4(out, outsize, 0x62); }
 
+long nl_info_req_set_clock(nl_u8 *out, long outsize, nl_date date, long secs)
+{
+    int y = nl_date_year(date), mo = nl_date_month(date), da = nl_date_day(date);
+    if (outsize < 14) return NL_INFO_ERR_SPACE;
+    out[0]=0x00; out[1]=0x01; out[2]=0x00;   /* N6110 header */
+    out[3]=0x60; out[4]=0x01; out[5]=0x01; out[6]=0x07;
+    out[7]=(nl_u8)(y >> 8); out[8]=(nl_u8)y;
+    out[9]=(nl_u8)mo; out[10]=(nl_u8)da;
+    out[11]=(nl_u8)(secs / 3600); out[12]=(nl_u8)((secs / 60) % 60);
+    out[13]=0x00;
+    return 14;
+}
+
+int nl_info_parse_set_clock(const nl_u8 *body, long len)
+{
+    if (len < 5) return NL_INFO_ERR_SHORT;
+    if (body[3] != 0x61) return NL_INFO_ERR_SUB;
+    return body[4] == 0x01 ? NL_INFO_OK : NL_INFO_ERR_NODATA;
+}
+
 /* ---- Replies -------------------------------------------------------- */
 
 /* Copy one text line (printable ASCII, stops at CR/LF/zero/end). */

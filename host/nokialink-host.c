@@ -3,7 +3,7 @@
  * the protocol code before the Plus is involved (docs/PLAN.md, Phase 1).
  *
  * Usage: nokialink-host <command> <device> [trace-file]
- *   commands: identify battery signal network clock contacts sms calendar calls sim-info migrate-sim clear-sms clear-outbox status
+ *   commands: identify battery signal network clock set-clock contacts sms calendar calls sim-info migrate-sim clear-sms clear-outbox status
  * All read-only: nothing is written to the phone.
  *
  * First worked against a real 7110 (NSE-5, firmware 04.80) on 18 Nov 2026
@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <dirent.h>
@@ -76,6 +77,8 @@ static int ask(nl_link *l, const char *what, nl_u8 type,
                nl_u8 *reply, long cap, long *len)
 {
     int err = nl_link_request(l, type, req, rn, reply_type, reply, cap, len, 2000);
+    if (err == NL_ERR_TIMEOUT)   /* the first request after start-up is sometimes lost */
+        err = nl_link_request(l, type, req, rn, reply_type, reply, cap, len, 2000);
     if (err != NL_OK) { printf("%s: %s\n", what, error_text(err)); return err; }
     return NL_OK;
 }
@@ -145,6 +148,28 @@ static int do_network(nl_link *l)
     if (!net.registered) { printf("network: not registered\n"); return 0; }
     printf("network %s  (MCC/MNC %s, LAC %s, cell %s)\n",
            net.name, net.code, net.lac, net.cid);
+    return 0;
+}
+
+/* Set the phone's clock to this computer's current local time (the Plus is
+ * meant to be the reference clock; here the Mac stands in). */
+static int do_set_clock(nl_link *l)
+{
+    nl_u8 req[16], reply[128]; long rn, len; int err;
+    time_t now = time(0);
+    struct tm *tm = localtime(&now);
+    nl_date d = nl_date_make(tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday);
+    long secs = tm->tm_hour * 3600L + tm->tm_min * 60L + tm->tm_sec;
+
+    rn = nl_info_req_set_clock(req, sizeof req, d, secs);
+    err = nl_link_request(l, NL_INFO_TYPE_CLOCK, req, rn, NL_INFO_TYPE_CLOCK, reply, sizeof reply, &len, 2500);
+    if (err == NL_ERR_TIMEOUT)
+        err = nl_link_request(l, NL_INFO_TYPE_CLOCK, req, rn, NL_INFO_TYPE_CLOCK, reply, sizeof reply, &len, 2500);
+    if (err != NL_OK) { printf("set-clock: %s\n", error_text(err)); return 1; }
+    if (nl_info_parse_set_clock(reply, len) != NL_INFO_OK) { printf("set-clock: the phone did not confirm\n"); return 1; }
+    printf("clock set to %04d-%02d-%02d %02ld:%02ld:%02ld\n",
+           tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday,
+           secs / 3600, (secs / 60) % 60, secs % 60);
     return 0;
 }
 
@@ -1343,7 +1368,7 @@ int main(int argc, char **argv)
 
     if (argc < 3) {
         fprintf(stderr, "usage: nokialink-host <command> <device> [trace-file]\n"
-                        "  commands: identify battery signal network clock contacts sms calendar calls sim-info migrate-sim clear-sms clear-outbox status\n"
+                        "  commands: identify battery signal network clock set-clock contacts sms calendar calls sim-info migrate-sim clear-sms clear-outbox status\n"
                         "           archive-sms <device> <archive-file>\n"
                         "           archive-contacts <device> <store-folder>\n"
                         "           archive-calls <device> <archive-file>\n"
@@ -1393,6 +1418,7 @@ int main(int argc, char **argv)
     else if (strcmp(cmd, "signal")   == 0) bad = do_signal(&link);
     else if (strcmp(cmd, "network")  == 0) bad = do_network(&link);
     else if (strcmp(cmd, "clock")    == 0) bad = do_clock(&link);
+    else if (strcmp(cmd, "set-clock") == 0) bad = do_set_clock(&link);
     else if (strcmp(cmd, "contacts") == 0) bad = do_contacts(&link);
     else if (strcmp(cmd, "sms")      == 0) bad = do_sms(&link);
     else if (strcmp(cmd, "calendar") == 0) bad = do_calendar(&link);
