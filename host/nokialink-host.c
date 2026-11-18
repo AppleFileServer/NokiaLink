@@ -1022,6 +1022,7 @@ typedef struct {
     int  nemails;
     int  archive;   /* 1 if from the Archive list */
     int  matched;   /* set during the dry-run */
+    char file[512]; /* source path, for reloading when writing to the phone */
 } store_ct;
 
 /* Load every .vcf in <folder>/<sub> into out[n..]; returns the new n. */
@@ -1044,6 +1045,7 @@ static int load_store(const char *folder, const char *sub, int archive,
         if (nl_vcard_load(&v, buf, got) != NL_VC_OK) continue;
         s = &out[n];
         s->name[0]=0; s->nnums=0; s->archive=archive; s->matched=0;
+        strncpy(s->file, fp, sizeof s->file - 1); s->file[sizeof s->file - 1] = 0;
         nl_vcard_get(&v, "FN", 0, s->name, sizeof s->name);
         s->nemails = nl_vcard_count(&v, "EMAIL");
         c = nl_vcard_count(&v, "TEL");
@@ -1075,12 +1077,14 @@ static int store_match(store_ct *store, int ns, const nl_pbk_entry *e)
     return -1;
 }
 
+static int entry_is_code(const nl_pbk_entry *e);   /* defined below */
+
 static int do_sync_dry(nl_link *l, const char *folder)
 {
     static nl_pbk_entry ents[300]; static nl_u8 memof[300];
     static store_ct store[400];
     int nph, ns = 0, i, mi;
-    int add = 0, remove = 0, insync = 0, topush = 0;
+    int add = 0, remove = 0, insync = 0, topush = 0, skipped = 0;
 
     nph = read_mem_entries(l, NL_PBK_MEM_ME, ents, memof, 300, 0);
     ns = load_store(folder, "Main", 0, store, 400, 0);
@@ -1091,9 +1095,12 @@ static int do_sync_dry(nl_link *l, const char *folder)
     printf("Phone contacts NEW to the store -> ADD to Main:\n");
     for (i = 0; i < nph; i++) {
         mi = store_match(store, ns, &ents[i]);
-        if (mi < 0) { printf("   + %s\n", ents[i].name[0] ? ents[i].name : "(no name)"); add++; }
+        if (mi >= 0) continue;
+        if (entry_is_code(&ents[i]) || strcmp(ents[i].name, "MacWAP") == 0) { skipped++; continue; }
+        printf("   + %s\n", ents[i].name[0] ? ents[i].name : "(no name)"); add++;
     }
     if (!add) printf("   (none)\n");
+    if (skipped) printf("   (skipping %d code/excluded entry, e.g. menu codes, not contacts)\n", skipped);
 
     printf("\nPhone contacts that are in your Archive -> REMOVE from the phone:\n");
     for (i = 0; i < nph; i++) {
@@ -1117,6 +1124,127 @@ static int do_sync_dry(nl_link *l, const char *folder)
            add, remove, topush, insync);
     printf("(Run the real sync to apply. The store stays master; its richer cards win on detail.)\n");
     return 0;
+}
+
+/* A network/service code, not a contact (SPEC CON-15): no normal number. */
+static int entry_is_code(const nl_pbk_entry *e)
+{
+    const char *n = e->nnumbers ? e->numbers[0].text : "";
+    const char *p; int digits = 0;
+    if (!n[0]) return 1;
+    for (p = n; *p; p++) {
+        if (*p == '*' || *p == '#') return 1;
+        if (*p >= '0' && *p <= '9') digits++;
+    }
+    return digits < 7;
+}
+
+/* Build an nl_pbk_entry (name + numbers with kinds) from a store vCard. */
+static int vcard_file_to_entry(const char *path, nl_pbk_entry *e)
+{
+    char buf[NL_VCARD_MAX]; FILE *f; long got; nl_vcard v; int c, i;
+    f = fopen(path, "r"); if (!f) return 0;
+    got = (long)fread(buf, 1, sizeof buf - 1, f); fclose(f);
+    if (got <= 0 || nl_vcard_load(&v, buf, got) != NL_VC_OK) return 0;
+    memset(e, 0, sizeof *e);
+    nl_vcard_get(&v, "FN", 0, e->name, sizeof e->name);
+    c = nl_vcard_count(&v, "TEL");
+    for (i = 0; i < c && e->nnumbers < NL_PBK_MAX_NUMBERS; i++) {
+        char val[NL_PBK_NUM_MAX], par[80]; nl_num_type t = NL_NUM_GENERAL;
+        if (nl_vcard_get(&v, "TEL", i, val, sizeof val) <= 0) continue;
+        nl_vcard_params(&v, "TEL", i, par, sizeof par);
+        if      (nl_vcard_has_param(par, "CELL")) t = NL_NUM_MOBILE;
+        else if (nl_vcard_has_param(par, "HOME")) t = NL_NUM_HOME;
+        else if (nl_vcard_has_param(par, "WORK")) t = NL_NUM_WORK;
+        else if (nl_vcard_has_param(par, "FAX"))  t = NL_NUM_FAX;
+        strncpy(e->numbers[e->nnumbers].text, val, NL_PBK_NUM_MAX - 1);
+        e->numbers[e->nnumbers].text[NL_PBK_NUM_MAX - 1] = 0;
+        e->numbers[e->nnumbers].type = t;
+        e->nnumbers++;
+    }
+    return e->name[0] ? 1 : 0;
+}
+
+/* Apply the first contacts sync (store = master):
+ *   A  add phone-only contacts to Main (skipping codes and MacWAP),
+ *   B  write Main cards not on the phone into phone memory (verified),
+ *   C  remove phone contacts that are in the Archive.
+ * The store's richer cards are left as they are. */
+static int do_sync_apply(nl_link *l, const char *folder)
+{
+    static nl_pbk_entry ents[300]; static nl_u8 memof[300];
+    static store_ct store[400];
+    static char usedloc[1024];
+    nl_u8 req[256], reply[512]; long rn, len;
+    char maindir[1200];
+    int nph, ns, i, mi, err, k;
+    int added = 0, skipped = 0, written = 0, removed = 0, failed = 0;
+
+    nph = read_mem_entries(l, NL_PBK_MEM_ME, ents, memof, 300, 0);
+    ns = load_store(folder, "Main", 0, store, 400, 0);
+    ns = load_store(folder, "Archive", 1, store, 400, ns);
+    if (nph == 0 || ns == 0) { printf("sync: could not read phone (%d) or store (%d); aborting.\n", nph, ns); return 1; }
+    snprintf(maindir, sizeof maindir, "%s/Main", folder);
+    printf("sync: phone %d, store %d; applying...\n", nph, ns);
+
+    memset(usedloc, 0, sizeof usedloc);
+    for (i = 0; i < nph; i++) {
+        mi = store_match(store, ns, &ents[i]);
+        if (mi >= 0) store[mi].matched = 1;
+        if (ents[i].location > 0 && ents[i].location < 1024) usedloc[ents[i].location] = 1;
+    }
+
+    /* A: phone-only contacts -> add to Main (store write). */
+    for (i = 0; i < nph; i++) {
+        nl_vcard v; char fname[96], path[1300], key[220], uid[32]; long vl; FILE *vf;
+        if (store_match(store, ns, &ents[i]) >= 0) continue;
+        if (entry_is_code(&ents[i]) || strcmp(ents[i].name, "MacWAP") == 0) { skipped++; continue; }
+        key[0] = 0; strncat(key, ents[i].name, 160);
+        if (ents[i].nnumbers) strncat(key, ents[i].numbers[0].text, 40);
+        sprintf(uid, "nokialink-%08lx", (unsigned long)nl_crc32(key, (long)strlen(key)));
+        if (nl_ctvcard_build(&v, &ents[i], "Main", NL_PBK_MEM_ME, 0, 0, uid) != NL_VC_OK) { skipped++; continue; }
+        safe_base(ents[i].name[0] ? ents[i].name : uid, fname, sizeof fname);
+        snprintf(path, sizeof path, "%s/%s.vcf", maindir, fname);
+        vf = fopen(path, "w");
+        if (!vf) { printf("  cannot add '%s' to Main\n", ents[i].name); failed++; continue; }
+        vl = v.len; fwrite(v.text, 1, (size_t)vl, vf); fclose(vf);
+        added++;
+    }
+
+    /* C: phone contacts that are in the Archive -> delete from the phone. */
+    for (i = 0; i < nph; i++) {
+        mi = store_match(store, ns, &ents[i]);
+        if (mi < 0 || !store[mi].archive) continue;
+        rn = nl_pbk_req_delete(req, sizeof req, NL_PBK_MEM_ME, ents[i].location);
+        err = pbk_req(l, req, rn, reply, sizeof reply, &len);
+        if (err == NL_OK && len >= 4 && reply[3] == NL_PBK_DELETE_OK) {
+            removed++; if (ents[i].location < 1024) usedloc[ents[i].location] = 0;
+        } else { printf("  could not remove '%s' from phone\n", ents[i].name); failed++; }
+    }
+
+    /* B: Main cards not on the phone -> write to phone memory (verified). */
+    for (i = 0; i < ns; i++) {
+        nl_pbk_entry we, rd; int loc = 0;
+        if (store[i].archive || store[i].matched) continue;
+        if (!vcard_file_to_entry(store[i].file, &we)) { printf("  skip (unreadable): %s\n", store[i].name); failed++; continue; }
+        for (k = 1; k < 1024; k++) if (!usedloc[k]) { loc = k; break; }
+        if (!loc) { printf("  no free phone slot for '%s'\n", we.name); failed++; continue; }
+        rn = nl_pbk_req_write(req, sizeof req, NL_PBK_MEM_ME, (nl_u16)loc, &we);
+        if (rn < 0) { failed++; continue; }
+        err = pbk_req(l, req, rn, reply, sizeof reply, &len);
+        if (err != NL_OK || len < 4 || reply[3] != NL_PBK_WRITE_OK) { printf("  write failed: %s\n", we.name); failed++; continue; }
+        rn = nl_pbk_req_read(req, sizeof req, NL_PBK_MEM_ME, (nl_u16)loc);
+        err = pbk_req(l, req, rn, reply, sizeof reply, &len);
+        if (err == NL_OK && nl_pbk_parse_entry(reply, len, (nl_u16)loc, &rd) == NL_PBK_OK
+            && strcmp(rd.name, we.name) == 0) { usedloc[loc] = 1; written++; }
+        else { printf("  verify failed: %s\n", we.name); failed++; }
+    }
+
+    printf("\nsync done: added %d to Main, skipped %d (codes/excluded), "
+           "wrote %d to phone, removed %d from phone, %d failed.\n",
+           added, skipped, written, removed, failed);
+    printf("Reminder: set 'Memory in use -> Phone' on the handset if not already.\n");
+    return failed ? 1 : 0;
 }
 
 /* Collect one register's entries (stopping at the first without a call
@@ -1228,10 +1356,12 @@ int main(int argc, char **argv)
         return 1;
     }
     if (strcmp(cmd, "archive-sms") == 0 || strcmp(cmd, "archive-contacts") == 0 ||
-        strcmp(cmd, "archive-calls") == 0 || strcmp(cmd, "archive-calendar") == 0 || strcmp(cmd, "sync-dry") == 0) {
+        strcmp(cmd, "archive-calls") == 0 || strcmp(cmd, "archive-calendar") == 0 || strcmp(cmd, "sync-dry") == 0 ||
+        strcmp(cmd, "sync-contacts") == 0) {
         int wantsfolder = (strcmp(cmd, "archive-contacts") == 0 ||
                            strcmp(cmd, "archive-calendar") == 0 ||
-                           strcmp(cmd, "sync-dry") == 0);
+                           strcmp(cmd, "sync-dry") == 0 ||
+                           strcmp(cmd, "sync-contacts") == 0);
         if (argc < 4) {
             fprintf(stderr, "usage: nokialink-host %s <device> %s\n", cmd,
                     wantsfolder ? "<store-folder>" : "<archive-file>");
@@ -1272,6 +1402,7 @@ int main(int argc, char **argv)
     else if (strcmp(cmd, "clear-sms") == 0) bad = do_clear_sms(&link);
     else if (strcmp(cmd, "clear-outbox") == 0) bad = do_clear_outbox(&link);
     else if (strcmp(cmd, "sync-dry") == 0) bad = do_sync_dry(&link, argv[3]);
+    else if (strcmp(cmd, "sync-contacts") == 0) bad = do_sync_apply(&link, argv[3]);
     else if (strcmp(cmd, "archive-sms") == 0) bad = do_archive_sms(&link, argv[3]);
     else if (strcmp(cmd, "archive-contacts") == 0) bad = do_archive_contacts(&link, argv[3]);
     else if (strcmp(cmd, "archive-calls") == 0) bad = do_archive_calls(&link, argv[3]);
