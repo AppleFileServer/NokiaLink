@@ -181,8 +181,24 @@ store, after showing what will be written.
   The summary names it (decision 10).
 - **CON-8** Moving a contact to Archive removes it from the phone at
   the next sync. Moving it to Main sends it at the next sync.
-- **CON-9** Offer to move all SIM contacts to the phone's own memory in
-  one step, after a backup and with a list shown first (`PLAN.md` §7).
+- **CON-9** Move all SIM data to the phone's own memory as a standard
+  step (decision 13, 18 November 2026). The phone's own memory is far
+  larger (about 1000 entries against the SIM's ~250) and holds richer
+  fields, so NokiaLink prefers it. When it finds contacts (or other
+  movable data) on the SIM it copies each into the phone's own memory,
+  reads it back to confirm, and only then deletes the SIM original, so an
+  interruption never loses anything; the store's archive is the backstop.
+  A list is shown first and the whole step is offered before it runs; a
+  setting makes it automatic at every sync.
+  - **CON-9a** The phone's **"memory in use"** setting (which memory new
+    entries and the phone's own menus use) **cannot be changed over the
+    cable** — the 7110 has no FBUS command for it. After the move,
+    NokiaLink tells the owner to set it by hand (Names → Options →
+    Settings → Memory in use → Phone), the one step the cable cannot do.
+  - **CON-9b** SIM text messages are moved the same way where the phone
+    allows writing a message to its own memory; otherwise they are kept
+    in the message archive (already copied) and cleared from the SIM only
+    under the message rules (MSG-4).
 - **CON-10** Read the call lists (dialled, received, missed), speed
   dials and caller groups; set speed dials and caller groups (name,
   ringtone, logo).
