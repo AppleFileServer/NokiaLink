@@ -18,6 +18,7 @@
 #include "../src/core/nlsms.h"
 #include "../src/core/nlcal.h"
 #include "../src/store/nlmsgarc.h"
+#include "../src/store/nlnumber.h"
 #include "port_posix.h"
 
 static nl_u8 msg_buf[4096];
@@ -327,11 +328,75 @@ static int read_folder_joined(nl_link *l, nl_u8 folderid, const nl_u16 *locs, in
     return join_msgs(msgs, n, out, max);
 }
 
-static void print_joined(int idx, const joined_msg *j)
+/* A number -> contact-name index, built from the phone's own and SIM
+ * memories, so a message or call can show the contact's name (SPEC USE-2).
+ * Numbers are matched by nl_number_same, so national/international forms
+ * of the same number all match. */
+typedef struct {
+    char number[NL_PBK_NUM_MAX];
+    char name[NL_PBK_TEXT_MAX];
+} contact_num;
+
+static int add_mem_to_index(nl_link *l, nl_u8 mem, contact_num *idx, int max, int nidx)
+{
+    nl_u8 req[32], reply[1024]; long rn, len, loc;
+    nl_u16 used = 0, total = 0;
+    int err, found = 0;
+
+    rn = nl_pbk_req_status(req, sizeof req, mem);
+    err = nl_link_request(l, NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE, reply, sizeof reply, &len, 2500);
+    if (err == NL_ERR_TIMEOUT)
+        err = nl_link_request(l, NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE, reply, sizeof reply, &len, 2500);
+    if (err != NL_OK) return nidx;
+    if (nl_pbk_parse_status(reply, len, &used, &total) != NL_PBK_OK) return nidx;
+    if (total == 0 || total > 2000) total = 2000;
+
+    for (loc = 1; loc <= (long)total && found < (int)used && nidx < max; loc++) {
+        nl_pbk_entry e; int k;
+        rn = nl_pbk_req_read(req, sizeof req, mem, (nl_u16)loc);
+        if (rn < 0) continue;
+        err = nl_link_request(l, NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE, reply, sizeof reply, &len, 2500);
+        if (err != NL_OK) continue;
+        err = nl_pbk_parse_entry(reply, len, (nl_u16)loc, &e);
+        if (err == NL_PBK_ERR_EMPTY) continue;
+        if (err != NL_PBK_OK) continue;
+        found++;
+        if (!e.name[0]) continue;
+        for (k = 0; k < e.nnumbers && nidx < max; k++) {
+            strncpy(idx[nidx].number, e.numbers[k].text, sizeof idx[nidx].number - 1);
+            idx[nidx].number[sizeof idx[nidx].number - 1] = 0;
+            strncpy(idx[nidx].name, e.name, sizeof idx[nidx].name - 1);
+            idx[nidx].name[sizeof idx[nidx].name - 1] = 0;
+            nidx++;
+        }
+    }
+    return nidx;
+}
+
+static int build_contact_index(nl_link *l, contact_num *idx, int max)
+{
+    int n = 0;
+    n = add_mem_to_index(l, NL_PBK_MEM_ME, idx, max, n);
+    n = add_mem_to_index(l, NL_PBK_MEM_SIM, idx, max, n);
+    return n;
+}
+
+static const char *match_name(const contact_num *idx, int nidx, const char *number)
+{
+    int i;
+    if (!number || !number[0]) return "";
+    for (i = 0; i < nidx; i++)
+        if (nl_number_same(idx[i].number, number)) return idx[i].name;
+    return "";
+}
+
+static void print_joined(int idx, const joined_msg *j, const char *name)
 {
     printf("  [%d] %s", idx, nl_sms_pdu_name(j->pdu));
-    if (j->number[0])
+    if (j->number[0]) {
         printf("  %s %s", j->pdu == NL_SMS_SUBMIT ? "to" : "from", j->number);
+        if (name && name[0]) printf(" (%s)", name);
+    }
     if (j->has_time)
         printf("  %04d-%02d-%02d %02ld:%02ld",
                nl_date_year(j->time.date), nl_date_month(j->time.date),
@@ -349,7 +414,8 @@ static int do_sms(nl_link *l)
     nl_sms_folder folders[NL_SMS_MAX_FOLDERS];
     static joined_msg out[512];
     static nl_u16 locs[1200];
-    int err, i, k, n, nf, total = 0;
+    static contact_num cidx[800];
+    int err, i, k, n, nf, total = 0, ncidx;
 
     rn = nl_sms_req_status(req, sizeof req);
     err = nl_link_request(l, NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE,
@@ -367,11 +433,12 @@ static int do_sms(nl_link *l)
 
     nf = get_folders(l, folders, NL_SMS_MAX_FOLDERS);
     if (nf == 0) { printf("no folders listed\n"); return 1; }
+    ncidx = build_contact_index(l, cidx, 800);
     for (i = 0; i < nf; i++) {
         int nloc = folder_locations(l, folders[i].id, locs, 1200);
         printf("%s (%d):\n", folders[i].name, nloc);
         n = read_folder_joined(l, folders[i].id, locs, nloc, out, 512);
-        for (k = 0; k < n; k++) print_joined(k + 1, &out[k]);
+        for (k = 0; k < n; k++) print_joined(k + 1, &out[k], match_name(cidx, ncidx, out[k].number));
         total += n;
     }
     printf("read %d messages across %d folders\n", total, nf);
@@ -387,9 +454,10 @@ static int do_archive_sms(nl_link *l, const char *path)
     static nl_u16 locs[1200];
     static char fps[ARC_MAX_FP][9];
     static char line[8192];
+    static contact_num cidx[800];
     nl_sms_folder folders[NL_SMS_MAX_FOLDERS];
     FILE *f;
-    int nfps = 0, nf, fi, n, i, added = 0, dup = 0, isnew = 0, total = 0;
+    int nfps = 0, nf, fi, n, i, added = 0, dup = 0, isnew = 0, total = 0, ncidx;
 
     /* Load the fingerprints already in the file. */
     f = fopen(path, "r");
@@ -407,6 +475,7 @@ static int do_archive_sms(nl_link *l, const char *path)
 
     nf = get_folders(l, folders, NL_SMS_MAX_FOLDERS);
     if (nf == 0) { printf("archive: no folders listed\n"); return 1; }
+    ncidx = build_contact_index(l, cidx, 800);
 
     f = fopen(path, "a");
     if (!f) { printf("archive: cannot open %s for writing\n", path); return 1; }
@@ -426,7 +495,7 @@ static int do_archive_sms(nl_link *l, const char *path)
             r.folder = folders[fi].name;
             r.incoming = (out[i].pdu != NL_SMS_SUBMIT);
             r.number = out[i].number;
-            r.name = "";
+            r.name = match_name(cidx, ncidx, out[i].number);
             r.date = out[i].has_time ? out[i].time.date : 0;
             r.secs = out[i].time.secs;
             r.has_time = out[i].has_time;
