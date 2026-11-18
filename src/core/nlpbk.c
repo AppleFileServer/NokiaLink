@@ -1,4 +1,6 @@
 /* Contacts over the cable (see nlpbk.h). */
+#include <string.h>
+
 #include "nlpbk.h"
 
 /* Sub-block field ids (gnokii ncommon.h). */
@@ -19,7 +21,7 @@ static long u16(const nl_u8 *p) { return (p[0] << 8) | p[1]; }
 
 static int valid_mem(nl_u8 m)
 {
-    return m == NL_PBK_MEM_ME || m == NL_PBK_MEM_SIM ||
+    return m == NL_PBK_MEM_ME || m == NL_PBK_MEM_SIM || m == NL_PBK_MEM_OWN ||
            m == NL_PBK_MEM_DIALLED || m == NL_PBK_MEM_MISSED || m == NL_PBK_MEM_RECEIVED;
 }
 
@@ -48,6 +50,94 @@ long nl_pbk_req_status(nl_u8 *out, long outsize, nl_u8 memtype)
 }
 
 /* ---- Replies -------------------------------------------------------- */
+
+/* N7110 write block sub-type for a number's kind. */
+static nl_u8 write_num_type(nl_num_type t)
+{
+    switch (t) {
+    case NL_NUM_HOME:   return 0x02;
+    case NL_NUM_MOBILE: return 0x03;
+    case NL_NUM_FAX:    return 0x04;
+    case NL_NUM_WORK:   return 0x06;
+    default:            return 0x0A;   /* general */
+    }
+}
+
+/* Write one UCS-2 (big-endian) string from Mac Roman at out+off; returns
+ * the number of bytes written (chars*2). */
+static long put_ucs2(nl_u8 *out, const char *s, long chars)
+{
+    long i;
+    for (i = 0; i < chars; i++) {
+        nl_u16 u = nl_macroman_char((nl_u8)s[i]);
+        out[2*i] = (nl_u8)(u >> 8);
+        out[2*i+1] = (nl_u8)u;
+    }
+    return chars * 2;
+}
+
+long nl_pbk_req_write(nl_u8 *out, long outsize, nl_u8 memtype, nl_u16 location,
+                      const nl_pbk_entry *e)
+{
+    long n;
+    int blocks = 0, k;
+
+    if (!valid_mem(memtype)) return NL_PBK_ERR_MEM;
+    if (outsize < 18) return NL_PBK_ERR_SPACE;
+
+    out[0]=0x00; out[1]=0x01; out[2]=0x01;   /* N7110 header */
+    out[3]=0x0B;                              /* write sub-command */
+    out[4]=0x00; out[5]=0x01; out[6]=0x01; out[7]=0x00; out[8]=0x00; out[9]=0x0C; out[10]=0x00;
+    out[11]=memtype;
+    out[12]=(nl_u8)(location >> 8); out[13]=(nl_u8)location;
+    out[14]=0x00; out[15]=0x00; out[16]=0x00;
+    n = 18;
+
+    if (e->name[0]) {
+        long clen = (long)strlen(e->name);
+        long size = clen*2 + 2;               /* payload length */
+        if (n + size + 6 > outsize) return NL_PBK_ERR_SPACE;
+        out[n]=0x07; out[n+1]=0x00;
+        out[n+2]=(nl_u8)((size+6) >> 8); out[n+3]=(nl_u8)(size+6);
+        out[n+4]=(nl_u8)(blocks+1);
+        out[n+5]=(nl_u8)size;                 /* payload[0] */
+        put_ucs2(out + n + 6, e->name, clen);
+        out[n+6+2*clen]=0x00;                 /* payload tail */
+        out[n+5+size]=0x00;                   /* block tail */
+        n += size + 6; blocks++;
+    }
+
+    for (k = 0; k < e->nnumbers; k++) {
+        long clen = (long)strlen(e->numbers[k].text);
+        long size = clen*2 + 6;
+        if (n + size + 6 > outsize) return NL_PBK_ERR_SPACE;
+        out[n]=0x0B; out[n+1]=0x00;
+        out[n+2]=(nl_u8)((size+6) >> 8); out[n+3]=(nl_u8)(size+6);
+        out[n+4]=(nl_u8)(blocks+1);
+        out[n+5]=write_num_type(e->numbers[k].type);
+        out[n+6]=0x00; out[n+7]=0x00; out[n+8]=0x00;
+        out[n+9]=(nl_u8)(clen*2 + 2);
+        put_ucs2(out + n + 10, e->numbers[k].text, clen);
+        out[n+10+2*clen]=0x00;                /* payload tail */
+        out[n+5+size]=0x00;                   /* block tail */
+        n += size + 6; blocks++;
+    }
+
+    out[17]=(nl_u8)blocks;
+    return n;
+}
+
+long nl_pbk_req_delete(nl_u8 *out, long outsize, nl_u8 memtype, nl_u16 location)
+{
+    if (!valid_mem(memtype)) return NL_PBK_ERR_MEM;
+    if (outsize < 18) return NL_PBK_ERR_SPACE;
+    out[0]=0x00; out[1]=0x01; out[2]=0x01;   /* N7110 header */
+    out[3]=0x0F;                              /* delete sub-command */
+    out[4]=0x00; out[5]=0x01; out[6]=0x04; out[7]=0x00; out[8]=0x00; out[9]=0x0C; out[10]=0x01; out[11]=0xFF;
+    out[12]=(nl_u8)(location >> 8); out[13]=(nl_u8)location;
+    out[14]=memtype; out[15]=0x00; out[16]=0x00; out[17]=0x00;
+    return 18;
+}
 
 int nl_pbk_parse_status(const nl_u8 *body, long len, nl_u16 *used, nl_u16 *total)
 {
@@ -182,6 +272,7 @@ const char *nl_pbk_mem_name(nl_u8 memtype)
     switch (memtype) {
     case NL_PBK_MEM_ME:       return "phone";
     case NL_PBK_MEM_SIM:      return "SIM";
+    case NL_PBK_MEM_OWN:      return "own numbers";
     case NL_PBK_MEM_DIALLED:  return "dialled";
     case NL_PBK_MEM_MISSED:   return "missed";
     case NL_PBK_MEM_RECEIVED: return "received";

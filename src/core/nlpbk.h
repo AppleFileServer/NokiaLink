@@ -23,6 +23,7 @@
 
 #define NL_PBK_MEM_ME       0x05 /* the phone's own memory (several numbers, email, ...) */
 #define NL_PBK_MEM_SIM      0x06 /* the SIM card (a name and one number) */
+#define NL_PBK_MEM_OWN      0x17 /* own numbers (the subscriber's MSISDN on the SIM) */
 /* The call registers are read the same way, by memory type; each entry
  * carries a number, maybe a name, and the time of the call (in `when`). */
 #define NL_PBK_MEM_DIALLED  0x01
@@ -69,6 +70,18 @@ long nl_pbk_req_read(nl_u8 *out, long outsize, nl_u8 memtype, nl_u16 location);
 
 /* Ask how many entries a memory holds and how many are free. */
 long nl_pbk_req_status(nl_u8 *out, long outsize, nl_u8 memtype);
+
+/* ---- Writes (Phase 2) ----------------------------------------------- *
+ * Build a request to write contact `e` to `memtype` at `location`, or to
+ * delete whatever is at that slot. The phone answers type 0x03 with
+ * sub-command NL_PBK_WRITE_OK after a write, NL_PBK_DELETE_OK after a
+ * delete (the sub-command is reply body[3]). Return the body length,
+ * NL_PBK_ERR_SPACE, or NL_PBK_ERR_MEM. */
+#define NL_PBK_WRITE_OK   0x0C
+#define NL_PBK_DELETE_OK  0x10
+long nl_pbk_req_write(nl_u8 *out, long outsize, nl_u8 memtype, nl_u16 location,
+                      const nl_pbk_entry *e);
+long nl_pbk_req_delete(nl_u8 *out, long outsize, nl_u8 memtype, nl_u16 location);
 
 /* ---- Replies -------------------------------------------------------- */
 

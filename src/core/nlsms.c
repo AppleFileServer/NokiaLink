@@ -82,6 +82,31 @@ int nl_sms_parse_folder_status(const nl_u8 *body, long len, nl_u16 *locs, int ma
     return NL_SMS_OK;
 }
 
+long nl_sms_req_smsc(nl_u8 *out, long outsize, nl_u8 location)
+{
+    if (outsize < 6) return NL_SMS_ERR_SPACE;
+    out[0]=0x00; out[1]=0x01; out[2]=0x00;   /* N6110 header */
+    out[3]=0x33; out[4]=0x64; out[5]=location;
+    return 6;
+}
+
+int nl_sms_parse_smsc(const nl_u8 *body, long len,
+                      char *number, long numsize, char *name, long namesize)
+{
+    long i, n;
+    if (numsize > 0) number[0] = 0;
+    if (namesize > 0) name[0] = 0;
+    if (len < 22) return NL_SMS_ERR_SHORT;
+    if (body[3] != 0x34) return NL_SMS_ERR_TYPE;   /* 0x35 = no SMSC at this location */
+    /* The centre's number: a service-centre address (octet count incl TOA). */
+    if (nl_gsm_number(body + 21, len - 21, 0, number, numsize) < 0 && numsize > 0)
+        number[0] = 0;
+    /* The name: ASCII from offset 33, zero-terminated. */
+    for (i = 33, n = 0; i < len && body[i] && n + 1 < namesize; i++) name[n++] = (char)body[i];
+    if (namesize > 0) name[n] = 0;
+    return NL_SMS_OK;
+}
+
 int nl_sms_parse_status(const nl_u8 *body, long len, nl_sms_status *st)
 {
     if (len < 18) return NL_SMS_ERR_SHORT;

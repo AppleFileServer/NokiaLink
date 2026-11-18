@@ -3,7 +3,7 @@
  * the protocol code before the Plus is involved (docs/PLAN.md, Phase 1).
  *
  * Usage: nokialink-host <command> <device> [trace-file]
- *   commands: identify battery signal network clock contacts sms calendar calls status
+ *   commands: identify battery signal network clock contacts sms calendar calls sim-info status
  * All read-only: nothing is written to the phone.
  *
  * First worked against a real 7110 (NSE-5, firmware 04.80) on 18 Nov 2026
@@ -797,6 +797,42 @@ static int do_calls(nl_link *l)
     return bad;
 }
 
+/* SIM-held settings: the message centre (SMSC) and the owner's own
+ * number(s). Read-only. */
+static int do_siminfo(nl_link *l)
+{
+    nl_u8 req[32], reply[256]; long rn, len; int err, loc, found = 0;
+    char num[48], nm[48];
+
+    rn = nl_sms_req_smsc(req, sizeof req, 1);
+    err = nl_link_request(l, NL_SMS_SMSC_TYPE, req, rn, NL_SMS_SMSC_TYPE, reply, sizeof reply, &len, 2500);
+    if (err == NL_ERR_TIMEOUT)
+        err = nl_link_request(l, NL_SMS_SMSC_TYPE, req, rn, NL_SMS_SMSC_TYPE, reply, sizeof reply, &len, 2500);
+    if (err == NL_OK && nl_sms_parse_smsc(reply, len, num, sizeof num, nm, sizeof nm) == NL_SMS_OK)
+        printf("message centre: %s%s%s\n", num[0] ? num : "(none)", nm[0] ? "  " : "", nm);
+    else
+        printf("message centre: %s\n", error_text(err));
+
+    printf("own numbers:\n");
+    for (loc = 1; loc <= 5; loc++) {
+        nl_pbk_entry e;
+        rn = nl_pbk_req_read(req, sizeof req, NL_PBK_MEM_OWN, (nl_u16)loc);
+        if (rn < 0) break;
+        err = nl_link_request(l, NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE, reply, sizeof reply, &len, 2500);
+        if (err != NL_OK) continue;
+        err = nl_pbk_parse_entry(reply, len, (nl_u16)loc, &e);
+        if (err == NL_PBK_ERR_EMPTY) continue;
+        if (err != NL_PBK_OK) continue;
+        if (e.nnumbers || e.name[0]) {
+            printf("  %s%s%s\n", e.nnumbers ? e.numbers[0].text : "",
+                   e.name[0] ? "  " : "", e.name);
+            found++;
+        }
+    }
+    if (!found) printf("  (none set)\n");
+    return 0;
+}
+
 /* Collect one register's entries (stopping at the first without a call
  * time, which marks the end) into out[n..]. Returns the new n. */
 static int read_register_entries(nl_link *l, nl_u8 mem, nl_pbk_entry *out, int max, int n)
@@ -893,7 +929,7 @@ int main(int argc, char **argv)
 
     if (argc < 3) {
         fprintf(stderr, "usage: nokialink-host <command> <device> [trace-file]\n"
-                        "  commands: identify battery signal network clock contacts sms calendar calls status\n"
+                        "  commands: identify battery signal network clock contacts sms calendar calls sim-info status\n"
                         "           archive-sms <device> <archive-file>\n"
                         "           archive-contacts <device> <store-folder>\n"
                         "           archive-calls <device> <archive-file>\n"
@@ -944,6 +980,7 @@ int main(int argc, char **argv)
     else if (strcmp(cmd, "sms")      == 0) bad = do_sms(&link);
     else if (strcmp(cmd, "calendar") == 0) bad = do_calendar(&link);
     else if (strcmp(cmd, "calls")    == 0) bad = do_calls(&link);
+    else if (strcmp(cmd, "sim-info") == 0) bad = do_siminfo(&link);
     else if (strcmp(cmd, "archive-sms") == 0) bad = do_archive_sms(&link, argv[3]);
     else if (strcmp(cmd, "archive-contacts") == 0) bad = do_archive_contacts(&link, argv[3]);
     else if (strcmp(cmd, "archive-calls") == 0) bad = do_archive_calls(&link, argv[3]);

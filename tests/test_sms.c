@@ -104,6 +104,24 @@ static void test_folders(void)
       CHECK(r==7 && o[2]==0x01 && o[3]==0x6B && o[4]==0x10 && o[5]==0x0F && o[6]==0x01); }
 }
 
+static void test_smsc(void)
+{
+    nl_u8 b[64]; char num[32], nm[32]; const char *name = "Test SC"; int i;
+    memset(b,0,sizeof b);
+    b[3]=0x34;                        /* SMSC reply OK */
+    /* centre number at offset 21: len 4 (toa + 3 octets), intl +441234 */
+    b[21]=4; b[22]=0x91; b[23]=0x44; b[24]=0x21; b[25]=0x43;
+    for(i=0;name[i];i++) b[33+i]=(nl_u8)name[i];
+    current = "smsc parse";
+    CHECK(nl_sms_parse_smsc(b, 44, num, sizeof num, nm, sizeof nm)==NL_SMS_OK);
+    CHECK(strcmp(num,"+441234")==0 && strcmp(nm,"Test SC")==0);
+    current = "smsc req";
+    { nl_u8 o[8]; long r = nl_sms_req_smsc(o,sizeof o,1);
+      CHECK(r==6 && o[3]==0x33 && o[4]==0x64 && o[5]==1); }
+    current = "smsc fail sub";
+    b[3]=0x35; CHECK(nl_sms_parse_smsc(b,44,num,sizeof num,nm,sizeof nm)==NL_SMS_ERR_TYPE);
+}
+
 static void test_requests(void)
 {
     nl_u8 o[8]; long n;
@@ -209,6 +227,7 @@ int main(void)
     test_8bit_and_errors();
     test_concat();
     test_folders();
+    test_smsc();
     printf("sms: %d checks, %d failures\n", checks, failures);
     return failures != 0;
 }

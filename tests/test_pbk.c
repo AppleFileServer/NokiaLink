@@ -175,9 +175,34 @@ static void test_calllog(void)
     CHECK(nl_pbk_parse_entry(b, off, 1, &e)==NL_PBK_OK && !e.has_when);
 }
 
+static void test_write(void)
+{
+    nl_u8 out[128]; long n; nl_pbk_entry e;
+    memset(&e, 0, sizeof e);
+    strcpy(e.name, "Pat");            /* 3 chars */
+    e.nnumbers = 1; e.numbers[0].type = NL_NUM_MOBILE; strcpy(e.numbers[0].text, "12345");
+
+    current = "write frame";
+    n = nl_pbk_req_write(out, sizeof out, NL_PBK_MEM_ME, 7, &e);
+    /* header: N7110 00 01 01, sub 0x0B, memtype at 11, location at 12..13, blocks at 17 */
+    CHECK(n > 18 && out[0]==0 && out[1]==1 && out[2]==1 && out[3]==0x0B
+          && out[11]==0x05 && out[12]==0 && out[13]==7 && out[17]==2);
+    /* name block at 18: id 0x07, blockno 1, payload[0]=len*2+2=8, then "Pat" UCS-2 */
+    CHECK(out[18]==0x07 && out[22]==1 && out[23]==8
+          && out[24]==0 && out[25]=='P' && out[26]==0 && out[27]=='a' && out[28]==0 && out[29]=='t');
+    current = "write cap/mem";
+    CHECK(nl_pbk_req_write(out, 10, NL_PBK_MEM_ME, 7, &e) == NL_PBK_ERR_SPACE);
+    CHECK(nl_pbk_req_write(out, sizeof out, 0x09, 7, &e) == NL_PBK_ERR_MEM);
+
+    current = "delete frame";
+    n = nl_pbk_req_delete(out, sizeof out, NL_PBK_MEM_SIM, 3);
+    CHECK(n==18 && out[3]==0x0F && out[12]==0 && out[13]==3 && out[14]==0x06);
+}
+
 int main(void)
 {
     test_requests();
+    test_write();
     test_calllog();
     test_status();
     test_entry();

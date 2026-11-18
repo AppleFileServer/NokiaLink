@@ -16,6 +16,7 @@
 #include "nlgsm.h"
 
 #define NL_SMS_MSG_TYPE   0x14
+#define NL_SMS_SMSC_TYPE  0x02   /* the message-centre request/reply use type 0x02 */
 
 #define NL_SMS_TEXT_MAX   360   /* Mac Roman text + zero (one SMS is <= 160) */
 #define NL_SMS_NUM_MAX    48
@@ -79,6 +80,9 @@ long nl_sms_req_read(nl_u8 *out, long outsize, nl_u8 folder, nl_u16 location);
 long nl_sms_req_folders(nl_u8 *out, long outsize);
 long nl_sms_req_folder_status(nl_u8 *out, long outsize, nl_u8 folderid);
 
+/* The message-centre (SMSC) at a location (1 is the usual one); type 0x02. */
+long nl_sms_req_smsc(nl_u8 *out, long outsize, nl_u8 location);
+
 /* ---- Replies -------------------------------------------------------- */
 
 int nl_sms_parse_status(const nl_u8 *body, long len, nl_sms_status *st);
@@ -89,6 +93,10 @@ int nl_sms_parse_folders(const nl_u8 *body, long len, nl_sms_folder *out, int ma
 /* Decode a folder-status reply (sub 0x6C): the message locations in the
  * folder into locs[0..*n-1]. */
 int nl_sms_parse_folder_status(const nl_u8 *body, long len, nl_u16 *locs, int max, int *n);
+
+/* Decode the SMSC reply (sub 0x34): the centre's number and its name. */
+int nl_sms_parse_smsc(const nl_u8 *body, long len,
+                      char *number, long numsize, char *name, long namesize);
 
 /* Decode a stored message into *out (cleared first). Returns NL_SMS_OK,
  * NL_SMS_ERR_TYPE for a kind not handled, or an error. The message body
