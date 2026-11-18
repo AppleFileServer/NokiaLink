@@ -66,8 +66,15 @@ int nl_pbk_parse_status(const nl_u8 *body, long len, nl_u16 *used, nl_u16 *total
 static int copy_text(const nl_u8 *body, long len, long off, int bytes,
                      char *dst, long dstsize, long *lost)
 {
+    int chars, i;
     if (bytes < 0 || off + bytes > len) return NL_PBK_ERR_SHORT;
-    if (nl_ucs2_to_macroman(body + off, bytes / 2, dst, dstsize, lost) < 0)
+    chars = bytes / 2;
+    /* The phone NUL-terminates each text and counts the terminator (and any
+     * padding) in the length; stop at the first UCS-2 NUL so the terminator
+     * is not decoded as a character. */
+    for (i = 0; i < chars; i++)
+        if (body[off + 2*i] == 0 && body[off + 2*i + 1] == 0) { chars = i; break; }
+    if (nl_ucs2_to_macroman(body + off, chars, dst, dstsize, lost) < 0)
         return NL_PBK_ERR_SPACE;
     return NL_PBK_OK;
 }

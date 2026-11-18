@@ -3,7 +3,7 @@
  * the protocol code before the Plus is involved (docs/PLAN.md, Phase 1).
  *
  * Usage: nokialink-host <command> <device> [trace-file]
- *   commands: identify  battery  signal  network  clock  status
+ *   commands: identify battery signal network clock contacts status
  * All read-only: nothing is written to the phone.
  *
  * First worked against a real 7110 (NSE-5, firmware 04.80) on 18 Nov 2026
@@ -14,6 +14,7 @@
 #include <string.h>
 #include "../src/core/link.h"
 #include "../src/core/nlinfo.h"
+#include "../src/core/nlpbk.h"
 #include "port_posix.h"
 
 static nl_u8 msg_buf[4096];
@@ -152,6 +153,64 @@ static int do_clock(nl_link *l)
     return 0;
 }
 
+static void print_entry(const nl_pbk_entry *e)
+{
+    int i;
+    printf("  [%u] %s\n", (unsigned)e->location, e->name[0] ? e->name : "(no name)");
+    for (i = 0; i < e->nnumbers; i++)
+        printf("       %-7s %s\n", nl_num_type_name(e->numbers[i].type), e->numbers[i].text);
+    if (e->email[0])  printf("       email   %s\n", e->email);
+    if (e->postal[0]) printf("       postal  %s\n", e->postal);
+    if (e->note[0])   printf("       note    %s\n", e->note);
+}
+
+/* Read one memory (ME or SIM): the count, then each entry in turn. */
+static int read_memory(nl_link *l, nl_u8 mem)
+{
+    nl_u8 req[32], reply[1024]; long rn, len, loc;
+    nl_u16 used = 0, total = 0;
+    int err, found = 0;
+    const char *name = nl_pbk_mem_name(mem);
+
+    rn = nl_pbk_req_status(req, sizeof req, mem);
+    err = nl_link_request(l, NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE,
+                          reply, sizeof reply, &len, 2500);
+    if (err == NL_ERR_TIMEOUT)   /* first request after start-up is sometimes lost */
+        err = nl_link_request(l, NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE,
+                              reply, sizeof reply, &len, 2500);
+    if (err != NL_OK) { printf("%s: %s\n", name, error_text(err)); return 1; }
+    if (nl_pbk_parse_status(reply, len, &used, &total) != NL_PBK_OK) {
+        hex("status reply (undecoded)", reply, len); return 1;
+    }
+    printf("%s: %u used of %u\n", name, (unsigned)used, (unsigned)total);
+    if (total == 0 || total > 2000) total = 2000;   /* guard a wild count */
+
+    for (loc = 1; loc <= (long)total && found < (int)used; loc++) {
+        nl_pbk_entry e;
+        rn = nl_pbk_req_read(req, sizeof req, mem, (nl_u16)loc);
+        if (rn < 0) continue;
+        err = nl_link_request(l, NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE,
+                              reply, sizeof reply, &len, 3000);
+        if (err != NL_OK) { printf("  [%ld] %s\n", loc, error_text(err)); continue; }
+        err = nl_pbk_parse_entry(reply, len, (nl_u16)loc, &e);
+        if (err == NL_PBK_ERR_EMPTY) continue;
+        if (err != NL_PBK_OK) { hex("  entry reply (undecoded)", reply, len); continue; }
+        print_entry(&e);
+        found++;
+    }
+    printf("read %d of %u from %s\n", found, (unsigned)used, name);
+    return 0;
+}
+
+/* Read both the phone's own memory and the SIM. */
+static int do_contacts(nl_link *l)
+{
+    int bad = 0;
+    bad |= read_memory(l, NL_PBK_MEM_ME);
+    bad |= read_memory(l, NL_PBK_MEM_SIM);
+    return bad;
+}
+
 int main(int argc, char **argv)
 {
     posix_port pp;
@@ -161,7 +220,7 @@ int main(int argc, char **argv)
 
     if (argc < 3) {
         fprintf(stderr, "usage: nokialink-host <command> <device> [trace-file]\n"
-                        "  commands: identify battery signal network clock status\n");
+                        "  commands: identify battery signal network clock contacts status\n");
         return 2;
     }
     cmd = argv[1];
@@ -194,6 +253,7 @@ int main(int argc, char **argv)
     else if (strcmp(cmd, "signal")   == 0) bad = do_signal(&link);
     else if (strcmp(cmd, "network")  == 0) bad = do_network(&link);
     else if (strcmp(cmd, "clock")    == 0) bad = do_clock(&link);
+    else if (strcmp(cmd, "contacts") == 0) bad = do_contacts(&link);
     else if (strcmp(cmd, "status")   == 0) {
         bad |= do_identify(&link);
         bad |= do_battery(&link);
