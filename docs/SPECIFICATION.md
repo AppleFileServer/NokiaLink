@@ -212,6 +212,14 @@ store, after showing what will be written.
 - **CON-12** NokiaLink never creates a contact from a message or call
   alone. Contacts come from the phone's own contact list or from the
   owner typing them.
+- **CON-15** Network and service codes are **not** contacts and are never
+  stored in Main or Archive (decision 14, 18 November 2026). These are
+  menu/USSD codes (e.g. `*#1345#`), carrier short-codes (balance, top-up,
+  voicemail) and the like. When a phone entry is really such a code (no
+  normal number, or a known short-code), sync skips it for Main. NokiaLink
+  instead keeps a separate **reference list of menu, carrier and phone
+  codes** (viewable, not merged with contacts) -- **PROVISIONAL**, a small
+  own-format file in the store.
 
 ### 4.4 Last-used dates and the 18-month check (USE)
 
