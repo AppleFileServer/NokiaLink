@@ -1080,7 +1080,7 @@ static int do_sync_dry(nl_link *l, const char *folder)
     static nl_pbk_entry ents[300]; static nl_u8 memof[300];
     static store_ct store[400];
     int nph, ns = 0, i, mi;
-    int add = 0, moveback = 0, insync = 0, topush = 0;
+    int add = 0, remove = 0, insync = 0, topush = 0;
 
     nph = read_mem_entries(l, NL_PBK_MEM_ME, ents, memof, 300, 0);
     ns = load_store(folder, "Main", 0, store, 400, 0);
@@ -1095,13 +1095,13 @@ static int do_sync_dry(nl_link *l, const char *folder)
     }
     if (!add) printf("   (none)\n");
 
-    printf("\nPhone contacts in the ARCHIVE list -> MOVE back to Main:\n");
+    printf("\nPhone contacts that are in your Archive -> REMOVE from the phone:\n");
     for (i = 0; i < nph; i++) {
         mi = store_match(store, ns, &ents[i]);
-        if (mi >= 0 && store[mi].archive) { printf("   > %s\n", ents[i].name); store[mi].matched = 1; moveback++; }
+        if (mi >= 0 && store[mi].archive) { printf("   - %s\n", ents[i].name); store[mi].matched = 1; remove++; }
         else if (mi >= 0) { store[mi].matched = 1; insync++; }
     }
-    if (!moveback) printf("   (none)\n");
+    if (!remove) printf("   (none)\n");
 
     printf("\nStore Main contacts NOT on the phone -> WRITE to the phone:\n");
     for (i = 0; i < ns; i++) {
@@ -1112,8 +1112,9 @@ static int do_sync_dry(nl_link *l, const char *folder)
     if (!topush) printf("   (none)\n");
 
     printf("\nAlready in sync (phone contact matches a Main card): %d\n", insync);
-    printf("\nSummary: %d to add to Main, %d to move Archive->Main, %d to write to the phone, %d unchanged.\n",
-           add, moveback, topush, insync);
+    printf("\nSummary: %d to add to Main, %d to remove from the phone (in Archive), "
+           "%d to write to the phone, %d unchanged.\n",
+           add, remove, topush, insync);
     printf("(Run the real sync to apply. The store stays master; its richer cards win on detail.)\n");
     return 0;
 }
