@@ -322,8 +322,6 @@ In order of preference:
 | 10 | A contact deleted on the phone (16 November 2026) | It moves to Archive on the Plus; a sync never deletes it from the store. NokiaLink can show, search and edit the Archive list, and move contacts between the lists by hand |
 | 11 | A new phone contact matching an archived one (16 November 2026) | The archived contact moves back to Main without asking; the fields the phone holds replace the stored ones |
 | 12 | Call lists (16 November 2026) | Cleared from the phone after copying, as texts are |
-| 14 | Codes are not contacts (18 November 2026) | Menu/USSD codes, carrier short-codes (balance, top-up, voicemail) and the like are never stored as contacts; sync skips them for Main. NokiaLink keeps a separate reference list of such codes instead. See SPEC CON-15 |
-| 13 | SIM → phone memory (18 November 2026) | NokiaLink moves SIM data to the phone's own (far larger) memory as a standard step: copy each entry to phone memory, read it back to confirm, then delete the SIM original; a setting makes it automatic at sync. The "memory in use" setting cannot be changed over the cable (no FBUS command on the 7110), so NokiaLink prompts the owner to set it on the phone by hand. See SPEC CON-9/9a/9b |
 | 13 | Calendar on the phone (16 November 2026) | As many notes and meetings on the phone as it can hold. How its limited memory is managed is left until the phone's limits are known (Phase 0) |
 | 14 | Clocks (16 November 2026) | The Plus is the reference. Because its clock battery can go flat, the Plus's clock is used only when it passes a check; the owner confirms it on the first connection; within a small difference the phone is set from the Plus without asking; otherwise NokiaLink asks. NokiaLink never needs the internet for this. Rules: `SPECIFICATION.md` §4.13 |
 | 15 | Printing (16 November 2026) | Included from the first version |
@@ -331,6 +329,9 @@ In order of preference:
 | 17 | Further phone functions (16 November 2026) | The functions believed available but not in the first list (other number lists, display indicators, PIN state, IMSI, profile detail, message settings) go into the specification to be tried, and are removed if the phone refuses them (`SPECIFICATION.md` §4.14). Reaching the Pi gateway from the Plus through the phone while away is parked (section 9) |
 | 18 | Desk accessory (16 November 2026) | A desk accessory is part of the specification (`SPECIFICATION.md` §8), built after the main program's first B-1.0.0 release |
 | 19 | A new contact's date (16 November 2026) | A contact is given the date it is added as its last-used date, so the monthly check does not ask about it straight away |
+| 20 | SIM → phone memory (18 November 2026) | NokiaLink moves SIM data to the phone's own (far larger) memory as a standard step: copy each entry to phone memory, read it back to confirm, then delete the SIM original; a setting makes it automatic at sync. The "memory in use" setting cannot be changed over the cable (no FBUS command on the 7110), so NokiaLink prompts the owner to set it on the phone by hand. See SPEC CON-9/9a/9b |
+| 21 | Codes are not contacts (18 November 2026) | Menu/USSD codes, carrier short-codes (balance, top-up, voicemail) and the like are never stored as contacts; sync skips them for Main. NokiaLink keeps a separate reference list of such codes instead. See SPEC CON-15 |
+| 22 | One window (18 November 2026) | NokiaLink runs mostly in a single window whose content and title change with the view (Phone, Contacts, Messages, ...), chosen from the View menu, rather than one window per kind. See SPEC APP-1 |
 
 ## 7. The phone's two contact memories
 

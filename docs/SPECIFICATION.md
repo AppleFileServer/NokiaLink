@@ -182,7 +182,7 @@ store, after showing what will be written.
 - **CON-8** Moving a contact to Archive removes it from the phone at
   the next sync. Moving it to Main sends it at the next sync.
 - **CON-9** Move all SIM data to the phone's own memory as a standard
-  step (decision 13, 18 November 2026). The phone's own memory is far
+  step (decision 20, 18 November 2026). The phone's own memory is far
   larger (about 1000 entries against the SIM's ~250) and holds richer
   fields, so NokiaLink prefers it. When it finds contacts (or other
   movable data) on the SIM it copies each into the phone's own memory,
@@ -213,7 +213,7 @@ store, after showing what will be written.
   alone. Contacts come from the phone's own contact list or from the
   owner typing them.
 - **CON-15** Network and service codes are **not** contacts and are never
-  stored in Main or Archive (decision 14, 18 November 2026). These are
+  stored in Main or Archive (decision 21, 18 November 2026). These are
   menu/USSD codes (e.g. `*#1345#`), carrier short-codes (balance, top-up,
   voicemail) and the like. When a phone entry is really such a code (no
   normal number, or a known short-code), sync skips it for Main. NokiaLink
@@ -343,10 +343,16 @@ store, after showing what will be written.
 
 ### 4.12 The application (APP)
 
-- **APP-1** A normal System 6 application: menu bar, movable windows,
-  standard dialogs, readable on the 512 × 342 screen. Windows: Phone,
-  Contacts, Calendar, Messages, Calls, Sounds & Pictures, WAP, Service
-  (`PLAN.md` §2.5).
+- **APP-1** A normal System 6 application: menu bar, standard dialogs,
+  readable on the 512 × 342 screen. NokiaLink runs **mostly in one
+  window** (decision 22, 18 November 2026): a single "NokiaLink" window
+  whose content and title change with the view, chosen from the View menu
+  — Phone, Contacts, Calendar, Messages, Calls, Sounds & Pictures, WAP,
+  Service. Each view is one scrolling list (the Phone view shows the status
+  as rows); the window title reads "NokiaLink - <view>". Dialogs
+  (New Message, confirmations, the monthly check) are separate as usual.
+  Started: one window with Phone/Contacts/Messages views, switched from the
+  View menu (built 18 November 2026).
 - **APP-2** Everything except live functions works with no phone
   connected: reading and editing contacts and the calendar, reading the
   archive and call log, the monthly check.
