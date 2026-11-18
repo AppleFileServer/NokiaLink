@@ -159,15 +159,14 @@ static void BuildStatusViaLink(void)
 }
 #endif
 
-static void DrawCStr(const char *s) { DrawText((Ptr)s, 0, (short)strlen(s)); }
 
 enum {
     kMenuBar = 128,
     kAppleMenu = 128, kAboutItem = 1,
     kFileMenu = 129, kQuitItem = 1,
     kEditMenu = 130,
-    kViewMenu = 131, kContactsItem = 1, kMessagesItem = 2,
-    kPhoneWindow = 128, kContactsWindow = 129, kMessagesWindow = 130,
+    kViewMenu = 131, kPhoneItem = 1, kContactsItem = 2, kMessagesItem = 3,
+    kMainWindow = 128,
     kAboutAlert = 128
 };
 
@@ -199,22 +198,26 @@ static long build_pbk_reply(nl_u8 *b, long cap, const char *name, nl_u8 ntype, c
     return off;
 }
 
-/* The list windows (Contacts, Messages); more can be added the same way. */
-static nl_listwin gContacts, gMessages;
+/* NokiaLink runs in one window whose content switches between views. */
+#define VIEW_PHONE    0
+#define VIEW_CONTACTS 1
+#define VIEW_MESSAGES 2
+static nl_listwin gMain;
+static short      gView;
 
 static void add_entry_row(const nl_pbk_entry *e)
 {
     char row[96];
     strcpy(row, e->name);
     if (e->nnumbers) { strcat(row, "  "); strcat(row, e->numbers[0].text); }
-    listwin_add(&gContacts, row);
+    listwin_add(&gMain, row);
 }
 
 /* Canned path (the normal build): decode each reply body straight away. */
 static void BuildContacts(void)
 {
     nl_u8 b[128]; nl_pbk_entry e; long n; int i;
-    listwin_clear(&gContacts);
+    listwin_clear(&gMain);
     for (i = 0; i < kSampleN; i++) {
         n = build_pbk_reply(b, sizeof b, kSample[i].name, kSample[i].ntype, kSample[i].num);
         if (nl_pbk_parse_entry(b, n, (nl_u16)(i+1), &e) == NL_PBK_OK)
@@ -236,7 +239,7 @@ static void BuildContactsViaLink(void)
     nl_u8 req[32], reply[256]; long rn, len, n; int i;
     nl_pbk_entry e; fp_reply r;
 
-    listwin_clear(&gContacts);
+    listwin_clear(&gMain);
     fp_init(&gFakeC);
     for (i = 0; i < kSampleN && i < 8; i++) {
         n = build_pbk_reply(gPbkBody[i], (long)sizeof gPbkBody[i],
@@ -265,12 +268,12 @@ static void BuildContactsViaLink(void)
  * to the phone is live, decoded by nlsms as the host tool already does. */
 static void BuildMessages(void)
 {
-    listwin_clear(&gMessages);
-    listwin_add(&gMessages, "Ada Lovelace     See you at the lecture at 3");
-    listwin_add(&gMessages, "Alan Turing      Bring the papers tomorrow x");
-    listwin_add(&gMessages, "me > Grace       On my way, five minutes");
-    listwin_add(&gMessages, "Katherine J.     Numbers check out, go for launch");
-    listwin_add(&gMessages, "me > Edsger      Lunch at one?");
+    listwin_clear(&gMain);
+    listwin_add(&gMain, "Ada Lovelace     See you at the lecture at 3");
+    listwin_add(&gMain, "Alan Turing      Bring the papers tomorrow x");
+    listwin_add(&gMain, "me > Grace       On my way, five minutes");
+    listwin_add(&gMain, "Katherine J.     Numbers check out, go for launch");
+    listwin_add(&gMain, "me > Edsger      Lunch at one?");
     (void)nl_sms_pdu_name;   /* nlsms is linked in for the real read later */
 }
 
@@ -279,7 +282,6 @@ static void BuildMessages(void)
 enum { kStackSize = 16L * 1024 };
 
 static Boolean gQuit;
-static WindowPtr gPhoneWindow;
 
 static void About(void)
 {
@@ -287,28 +289,57 @@ static void About(void)
     Alert(kAboutAlert, nil);
 }
 
-static void DrawPhoneWindow(void)
+/* Set the single window's title to the current view. */
+static void set_title(const char *s)
 {
-    GrafPtr saved;
+    Str255 p; int i;
+    for (i = 0; s[i] && i < 255; i++) p[i + 1] = (unsigned char)s[i];
+    p[0] = (unsigned char)i;
+    if (gMain.win) SetWTitle(gMain.win, p);
+}
 
-    GetPort(&saved);
-    SetPort(gPhoneWindow);
-    EraseRect(&gPhoneWindow->portRect);
-    TextFont(3);                /* Geneva 9 throughout, so line metrics are uniform */
-    TextSize(9);
-    MoveTo(14, 18); DrawCStr(gModel[0] ? gModel : "No phone connected.");
-    MoveTo(14, 34); DrawCStr(gFirmware);
-    MoveTo(14, 50); DrawCStr(gBattery);
-    MoveTo(14, 66); DrawCStr(gNetwork);
-    MoveTo(14, 82); DrawCStr(gClock);
+/* The Phone view is the status, shown as rows in the one window. */
+static void fill_phone_view(void)
+{
+    listwin_clear(&gMain);
+    listwin_add(&gMain, gModel[0] ? gModel : "No phone connected.");
+    if (gFirmware[0]) listwin_add(&gMain, gFirmware);
+    if (gBattery[0])  listwin_add(&gMain, gBattery);
+    if (gNetwork[0])  listwin_add(&gMain, gNetwork);
+    if (gClock[0])    listwin_add(&gMain, gClock);
 #ifdef NOKIALINK_FAKEPHONE
-    MoveTo(14, 104); DrawCStr("(read through the link from the pretend phone)");
+    listwin_add(&gMain, "(read through the link from the pretend phone)");
 #else
-    MoveTo(14, 104); DrawCStr("(sample data \320 the serial link is not built yet)");
+    listwin_add(&gMain, "(sample data \320 the serial link is not built yet)");
 #endif
-    TextFont(0);
-    TextSize(0);
-    SetPort(saved);
+}
+
+/* Switch the window to a view: refill the list and rename the window. */
+static void SwitchView(short v)
+{
+    gView = v;
+    switch (v) {
+    case VIEW_CONTACTS:
+#ifdef NOKIALINK_FAKEPHONE
+        BuildContactsViaLink();
+#else
+        BuildContacts();
+#endif
+        set_title("NokiaLink \320 Contacts");
+        break;
+    case VIEW_MESSAGES:
+        BuildMessages();
+        set_title("NokiaLink \320 Messages");
+        break;
+    default:
+        fill_phone_view();
+        set_title("NokiaLink \320 Phone");
+        break;
+    }
+    if (gMain.win) {
+        SetPort(gMain.win);
+        InvalRect(&gMain.win->portRect);
+    }
 }
 
 static void DoMenu(long choice)
@@ -335,8 +366,9 @@ static void DoMenu(long choice)
         SystemEdit(item - 1);   /* a desk accessory's, if one is in front */
         break;
     case kViewMenu:
-        if (item == kContactsItem) listwin_show(&gContacts);
-        else if (item == kMessagesItem) listwin_show(&gMessages);
+        if (item == kPhoneItem) SwitchView(VIEW_PHONE);
+        else if (item == kContactsItem) SwitchView(VIEW_CONTACTS);
+        else if (item == kMessagesItem) SwitchView(VIEW_MESSAGES);
         break;
     }
     HiliteMenu(0);
@@ -367,10 +399,8 @@ static void HandleEvent(EventRecord *event)
         case inContent:
             if (window != FrontWindow())
                 SelectWindow(window);
-            else if (listwin_owns(&gContacts, window))
-                listwin_click(&gContacts, event);
-            else if (listwin_owns(&gMessages, window))
-                listwin_click(&gMessages, event);
+            else if (listwin_owns(&gMain, window))
+                listwin_click(&gMain, event);
             break;
         }
         break;
@@ -381,22 +411,13 @@ static void HandleEvent(EventRecord *event)
         break;
     case updateEvt:
         window = (WindowPtr)event->message;
-        if (window == gPhoneWindow) {
-            BeginUpdate(window);
-            DrawPhoneWindow();
-            EndUpdate(window);
-        } else if (listwin_owns(&gContacts, window)) {
-            listwin_update(&gContacts);
-        } else if (listwin_owns(&gMessages, window)) {
-            listwin_update(&gMessages);
-        }
+        if (listwin_owns(&gMain, window))
+            listwin_update(&gMain);
         break;
     case activateEvt:
         window = (WindowPtr)event->message;
-        if (listwin_owns(&gContacts, window))
-            listwin_activate(&gContacts, (event->modifiers & activeFlag) != 0);
-        else if (listwin_owns(&gMessages, window))
-            listwin_activate(&gMessages, (event->modifiers & activeFlag) != 0);
+        if (listwin_owns(&gMain, window))
+            listwin_activate(&gMain, (event->modifiers & activeFlag) != 0);
         break;
     }
 }
@@ -426,16 +447,9 @@ static void Init(void)
 #else
     BuildSampleStatus();
 #endif
-    gPhoneWindow = GetNewWindow(kPhoneWindow, nil, (WindowPtr)-1L);
-    listwin_create(&gContacts, kContactsWindow);
-    listwin_create(&gMessages, kMessagesWindow);
-#ifdef NOKIALINK_FAKEPHONE
-    BuildContactsViaLink();
-#else
-    BuildContacts();
-#endif
-    BuildMessages();
-    listwin_show(&gContacts);   /* open Contacts at startup; Messages via the View menu */
+    listwin_create(&gMain, kMainWindow);
+    SwitchView(VIEW_PHONE);      /* the window opens on the Phone view */
+    listwin_show(&gMain);
 }
 
 int main(void)
@@ -447,8 +461,8 @@ int main(void)
     Smoke_Run();        /* run the module checks, write "out", then quit */
     return 0;
 #endif
-    if (gPhoneWindow)
-        ShowWindow(gPhoneWindow);
+    if (gMain.win)
+        ShowWindow(gMain.win);
     while (!gQuit)
     {
         if (WaitNextEvent(everyEvent, &event, 30, nil))

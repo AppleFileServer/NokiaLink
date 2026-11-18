@@ -74,6 +74,7 @@ resource 'MENU' (131) {
     allEnabled, enabled;
     "View";
     {
+        "Phone", noIcon, noKey, noMark, plain;
         "Contacts", noIcon, noKey, noMark, plain;
         "Messages", noIcon, noKey, noMark, plain;
     }
@@ -83,24 +84,11 @@ resource 'MBAR' (128) {
     { 128, 129, 130, 131 }
 };
 
-/* The Phone window: for now it only says that no phone is connected. */
+/* The one NokiaLink window. Its content and title switch between views
+   (Phone, Contacts, Messages) from the View menu. */
 resource 'WIND' (128) {
-    {48, 16, 168, 336},
-    noGrowDocProc, invisible, noGoAway, 0, "Phone",
-    noAutoCenter
-};
-
-/* The Contacts window: a scrolling list. */
-resource 'WIND' (129) {
-    {70, 60, 300, 320},
-    noGrowDocProc, invisible, goAway, 0, "Contacts",
-    noAutoCenter
-};
-
-/* The Messages window: a scrolling list. */
-resource 'WIND' (130) {
-    {86, 92, 300, 436},
-    noGrowDocProc, invisible, goAway, 0, "Messages",
+    {40, 20, 300, 340},
+    noGrowDocProc, invisible, noGoAway, 0, "NokiaLink",
     noAutoCenter
 };
 
