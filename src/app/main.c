@@ -22,6 +22,7 @@
 #include "nlpbk.h"
 #include "listwin.h"
 #include "nlsms.h"
+#include "dialogs.h"
 #ifdef NOKIALINK_SMOKE
 #include "smoke.h"
 #endif
@@ -167,9 +168,16 @@ enum {
     kEditMenu = 130,
     kViewMenu = 131, kPhoneItem = 1, kContactsItem = 2, kMessagesItem = 3,
     kCalendarItem = 4, kCallsItem = 5,
+    kActionsMenu = 132, kNewMessageItem = 1, kAddApptItem = 2,
+    kSyncItem = 4, kMigrateItem = 5, kSetClockItem = 6,
     kMainWindow = 128,
     kAboutAlert = 128
 };
+
+/* Until the serial link is built, each action gathers and confirms its
+ * input, names the write (SPEC APP-3), then says nothing was sent. When the
+ * link lands, these call the real nlsms/nlpbk/nlinfo requests. */
+static const char *kNoLink = "\rThe serial link is not built yet.";
 
 /* The made-up contacts the Contacts window shows. The pretend phone keeps
  * one per location, so reading them back over the link exercises the real
@@ -378,6 +386,52 @@ static void SwitchView(short v)
     }
 }
 
+static void DoAction(short item)
+{
+    char to[32], text[256], date[16], tim[8], atext[128], msg[352];
+    int type;
+
+    switch (item) {
+    case kNewMessageItem:
+        to[0] = text[0] = 0;
+        if (dlg_new_message(to, sizeof to, text, sizeof text)) {
+            if (!to[0]) { dlg_notice("Enter a number to send to."); break; }
+            strcpy(msg, "Ready to send to ");
+            strcat(msg, to);
+            strcat(msg, ".");
+            strcat(msg, kNoLink);
+            dlg_notice(msg);
+        }
+        break;
+    case kAddApptItem:
+        date[0] = tim[0] = atext[0] = 0; type = 0;
+        if (dlg_add_appt(&type, date, sizeof date, tim, sizeof tim,
+                         atext, sizeof atext)) {
+            strcpy(msg, "Ready to add a ");
+            strcat(msg, type ? "reminder" : "meeting");
+            if (date[0]) { strcat(msg, " on "); strcat(msg, date); }
+            strcat(msg, ".");
+            strcat(msg, kNoLink);
+            dlg_notice(msg);
+        }
+        break;
+    case kSyncItem:
+        if (dlg_confirm("Sync contacts between the phone and the Plus?\r"
+                        "Changes are listed before anything is written."))
+            dlg_notice("No sync was run.\rThe serial link is not built yet.");
+        break;
+    case kMigrateItem:
+        if (dlg_confirm("Move all SIM data into the phone's own memory, "
+                        "then clear it from the SIM?"))
+            dlg_notice("Nothing was moved.\rThe serial link is not built yet.");
+        break;
+    case kSetClockItem:
+        if (dlg_confirm("Set the phone's clock from the Macintosh?"))
+            dlg_notice("The clock was not set.\rThe serial link is not built yet.");
+        break;
+    }
+}
+
 static void DoMenu(long choice)
 {
     short menu = HiWord(choice), item = LoWord(choice);
@@ -407,6 +461,9 @@ static void DoMenu(long choice)
         else if (item == kMessagesItem) SwitchView(VIEW_MESSAGES);
         else if (item == kCalendarItem) SwitchView(VIEW_CALENDAR);
         else if (item == kCallsItem) SwitchView(VIEW_CALLS);
+        break;
+    case kActionsMenu:
+        DoAction(item);
         break;
     }
     HiliteMenu(0);

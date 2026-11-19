@@ -53,6 +53,7 @@ add_application(NokiaLink
     CREATOR "NkLk"
     src/app/main.c
     src/app/listwin.c
+    src/app/dialogs.c
     src/core/fbus.c
     src/core/link.c
     src/core/nlcal.c

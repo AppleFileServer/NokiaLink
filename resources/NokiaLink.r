@@ -82,8 +82,24 @@ resource 'MENU' (131) {
     }
 };
 
+/* The Actions menu: the things NokiaLink does to the phone. The divider
+   (item 3) is off: 0x7FFFFFFB clears bit 2. */
+resource 'MENU' (132) {
+    132, textMenuProc;
+    0x7FFFFFFB, enabled;
+    "Actions";
+    {
+        "New Message\0xC9", noIcon, "N", noMark, plain;
+        "Add Appointment\0xC9", noIcon, noKey, noMark, plain;
+        "-", noIcon, noKey, noMark, plain;
+        "Sync Contacts\0xC9", noIcon, noKey, noMark, plain;
+        "Migrate SIM to Phone\0xC9", noIcon, noKey, noMark, plain;
+        "Set Clock\0xC9", noIcon, noKey, noMark, plain;
+    }
+};
+
 resource 'MBAR' (128) {
-    { 128, 129, 130, 131 }
+    { 128, 129, 130, 131, 132 }
 };
 
 /* The one NokiaLink window. Its content and title switch between views
@@ -114,5 +130,83 @@ resource 'DITL' (128) {
             "The Macintosh Plus and the Nokia 7110, on a serial cable." };
         {80, 16, 98, 304}, StaticText { disabled,
             "\0xA9 2026 Jack McAteer" };
+    }
+};
+
+/* New Message: a recipient and the text. */
+resource 'DLOG' (200) {
+    {80, 60, 250, 420}, dBoxProc, invisible, noGoAway, 0, 200, "New Message",
+    noAutoCenter
+};
+
+resource 'DITL' (200) {
+    {
+        {138, 288, 158, 348}, Button { enabled, "Send" };
+        {138, 208, 158, 268}, Button { enabled, "Cancel" };
+        {14, 14, 30, 50}, StaticText { disabled, "To:" };
+        {12, 54, 30, 348}, EditText { enabled, "" };
+        {40, 14, 56, 90}, StaticText { disabled, "Message:" };
+        {60, 14, 128, 348}, EditText { enabled, "" };
+    }
+};
+
+/* Add Appointment: a meeting or a reminder, with date, time and text. */
+resource 'DLOG' (201) {
+    {70, 50, 280, 420}, dBoxProc, invisible, noGoAway, 0, 201, "Add Appointment",
+    noAutoCenter
+};
+
+resource 'DITL' (201) {
+    {
+        {178, 298, 198, 358}, Button { enabled, "OK" };
+        {178, 218, 198, 278}, Button { enabled, "Cancel" };
+        {14, 14, 30, 60}, StaticText { disabled, "Type:" };
+        {12, 70, 30, 180}, RadioButton { enabled, "Meeting" };
+        {12, 190, 30, 310}, RadioButton { enabled, "Reminder" };
+        {44, 14, 60, 60}, StaticText { disabled, "Date:" };
+        {42, 70, 60, 230}, EditText { enabled, "" };
+        {72, 14, 88, 60}, StaticText { disabled, "Time:" };
+        {70, 70, 88, 160}, EditText { enabled, "" };
+        {100, 14, 116, 60}, StaticText { disabled, "Text:" };
+        {118, 14, 170, 358}, EditText { enabled, "" };
+    }
+};
+
+/* Confirmation (OK/Cancel): ^0 is the message. */
+resource 'ALRT' (202) {
+    {90, 100, 210, 420}, 202,
+    {
+        OK, visible, sound1;
+        OK, visible, sound1;
+        OK, visible, sound1;
+        OK, visible, sound1
+    },
+    noAutoCenter
+};
+
+resource 'DITL' (202) {
+    {
+        {88, 240, 108, 300}, Button { enabled, "OK" };
+        {88, 160, 108, 220}, Button { enabled, "Cancel" };
+        {12, 16, 80, 300}, StaticText { disabled, "^0" };
+    }
+};
+
+/* Notice (one button): ^0 is the message. */
+resource 'ALRT' (203) {
+    {90, 100, 210, 420}, 203,
+    {
+        OK, visible, sound1;
+        OK, visible, sound1;
+        OK, visible, sound1;
+        OK, visible, sound1
+    },
+    noAutoCenter
+};
+
+resource 'DITL' (203) {
+    {
+        {88, 240, 108, 300}, Button { enabled, "OK" };
+        {12, 16, 80, 300}, StaticText { disabled, "^0" };
     }
 };
