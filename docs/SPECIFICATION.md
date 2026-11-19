@@ -351,8 +351,9 @@ store, after showing what will be written.
   Service. Each view is one scrolling list (the Phone view shows the status
   as rows); the window title reads "NokiaLink - <view>". Dialogs
   (New Message, confirmations, the monthly check) are separate as usual.
-  Started: one window with Phone/Contacts/Messages views, switched from the
-  View menu (built 18 November 2026).
+  Started: one window with Phone, Contacts, Messages, Calendar and Calls
+  views, switched from the View menu (built 18–19 November 2026). The lists
+  carry sample data until the link is built.
 - **APP-2** Everything except live functions works with no phone
   connected: reading and editing contacts and the calendar, reading the
   archive and call log, the monthly check.
@@ -368,6 +369,14 @@ store, after showing what will be written.
   thread, the call log for a chosen period, and the calendar for a
   chosen period. Standard Page Setup and Print dialogs; ImageWriter
   and LaserWriter.
+- **APP-8** The things NokiaLink does to the phone are reached from an
+  **Actions menu**: New Message, Add Appointment, Sync Contacts, Migrate
+  SIM → Phone, Set Clock. New Message and Add Appointment open a form
+  dialog (recipient and text; type, date, time and text); Sync, Migrate
+  and Set Clock first show a confirmation that names the write (APP-3).
+  Started: the Actions menu and all five dialogs are built and gather and
+  confirm input; until the link is built each action names what it would do
+  and then reports that the link is not ready (built 19 November 2026).
 
 ### 4.14 Further phone functions, to be tried (EXT)
 
