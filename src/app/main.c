@@ -213,7 +213,9 @@ enum {
 /* Until the serial link is built, each action gathers and confirms its
  * input, names the write (SPEC APP-3), then says nothing was sent. When the
  * link lands, these call the real nlsms/nlpbk/nlinfo requests. */
+#ifndef NOKIALINK_REALPHONE
 static const char *kNoLink = "\rThe serial link is not built yet.";
+#endif
 
 /* The made-up contacts the Contacts window shows. The pretend phone keeps
  * one per location, so reading them back over the link exercises the real
@@ -640,6 +642,145 @@ static void SwitchView(short v)
     }
 }
 
+#ifdef NOKIALINK_REALPHONE
+/* The actions, carried out over the live link. Each fills `out` with a short
+ * result the caller shows. They mirror the host tool's commands. */
+
+/* The next run of digits in a string, skipping any leading separators. */
+static int next_int(const char **pp)
+{
+    const char *p = *pp; int v = 0, any = 0;
+    while (*p && (*p < '0' || *p > '9')) p++;
+    while (*p >= '0' && *p <= '9') { v = v * 10 + (*p - '0'); p++; any = 1; }
+    *pp = p;
+    return any ? v : 0;
+}
+
+static void action_send_sms(const char *to, const char *text, char *out)
+{
+    nl_u8 req[300], reply[128]; long rn, len; int ref = -1, ec = -1;
+    char smsc[48], nm[48];
+
+    rn = nl_sms_req_smsc(req, sizeof req, 1);
+    if (phonelink_request(NL_SMS_SMSC_TYPE, req, rn, NL_SMS_SMSC_TYPE, reply, sizeof reply, &len, 3000) != NL_OK
+        || nl_sms_parse_smsc(reply, len, smsc, sizeof smsc, nm, sizeof nm) != NL_SMS_OK || !smsc[0]) {
+        strcpy(out, "Could not read the message centre number from the phone."); return;
+    }
+    rn = nl_sms_req_send(req, sizeof req, smsc, to, text);
+    if (rn < 0) { strcpy(out, "Could not build the message (too long?)."); return; }
+    if (phonelink_request(NL_SMS_SMSC_TYPE, req, rn, NL_SMS_SMSC_TYPE, reply, sizeof reply, &len, 12000) != NL_OK) {
+        strcpy(out, "The phone did not answer while sending."); return;
+    }
+    if (nl_sms_parse_send(reply, len, &ref, &ec) == NL_SMS_OK) {
+        strcpy(out, "Sent to "); strcat(out, to); strcat(out, ".");
+    } else {
+        strcpy(out, "Send failed (phone/network error "); append_num(out, ec); strcat(out, ").");
+    }
+}
+
+static void action_set_clock(char *out)
+{
+    nl_u8 req[16], reply[128]; long rn, len;
+    unsigned long now; DateTimeRec dt; nl_date d; long secs;
+
+    GetDateTime(&now);          /* seconds since 1904 from the low-memory clock */
+    SecondsToDate(now, &dt);    /* ... as this Macintosh's local date and time */
+    d = nl_date_make(dt.year, dt.month, dt.day);
+    secs = (long)dt.hour * 3600 + (long)dt.minute * 60 + dt.second;
+    rn = nl_info_req_set_clock(req, sizeof req, d, secs);
+    if (phonelink_request(NL_INFO_TYPE_CLOCK, req, rn, NL_INFO_TYPE_CLOCK, reply, sizeof reply, &len, 3000) != NL_OK
+        || nl_info_parse_set_clock(reply, len) != NL_INFO_OK) {
+        strcpy(out, "The phone did not confirm the clock was set."); return;
+    }
+    strcpy(out, "The phone's clock is set from the Macintosh.");
+}
+
+static void action_add_appt(int type, const char *date, const char *tim,
+                            const char *text, char *out)
+{
+    nl_u8 req[300], reply[128]; long rn, len; nl_cal_note nt;
+    int dd, mm, yy, hh, mi; const char *p;
+
+    memset(&nt, 0, sizeof nt);
+    p = date; dd = next_int(&p); mm = next_int(&p); yy = next_int(&p);
+    p = tim;  hh = next_int(&p); mi = next_int(&p);
+    if (yy > 0 && yy < 100) yy += 2000;
+    nt.date   = (dd && mm && yy) ? nl_date_make(yy, mm, dd) : 0;
+    nt.type   = type ? NL_CAL_REMINDER : NL_CAL_MEETING;
+    nt.hour   = hh;
+    nt.minute = mi;
+    strncpy(nt.text, text, sizeof nt.text - 1);
+    nt.text[sizeof nt.text - 1] = 0;
+
+    rn = nl_cal_req_add(req, sizeof req, &nt);
+    if (rn < 0) { strcpy(out, "Could not build the appointment."); return; }
+    if (phonelink_request(NL_CAL_MSG_TYPE, req, rn, NL_CAL_MSG_TYPE, reply, sizeof reply, &len, 4000) != NL_OK
+        || nl_cal_parse_add(reply, len) != NL_CAL_OK) {
+        strcpy(out, "The phone did not confirm the appointment."); return;
+    }
+    strcpy(out, type ? "Reminder added to the phone." : "Meeting added to the phone.");
+}
+
+/* Copy every SIM contact into phone memory, verify each, then clear the SIM
+ * originals -- the safe three-phase migration (SPEC CON-9). Aborts before
+ * clearing if anything is wrong, so the SIM is only cleared once the copies
+ * are confirmed. */
+static void action_migrate(char *out)
+{
+    nl_u8 req[256], reply[256]; long rn, len, loc;
+    nl_u16 me_used = 0, me_total = 0, sim_used = 0, sim_total = 0;
+    static nl_u16 simlocs[260];
+    int k = 0, wrote = 0, cleared = 0, i;
+    nl_pbk_entry e, rd;
+
+    rn = nl_pbk_req_status(req, sizeof req, NL_PBK_MEM_ME);
+    if (phonelink_request(NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE, reply, sizeof reply, &len, 3000) != NL_OK
+        || nl_pbk_parse_status(reply, len, &me_used, &me_total) != NL_PBK_OK) {
+        strcpy(out, "Could not read phone-memory status. Nothing changed."); return;
+    }
+    if (me_used != 0) {
+        strcpy(out, "Phone memory is not empty, so migration would overwrite entries. Nothing changed.");
+        return;
+    }
+    rn = nl_pbk_req_status(req, sizeof req, NL_PBK_MEM_SIM);
+    if (phonelink_request(NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE, reply, sizeof reply, &len, 3000) != NL_OK
+        || nl_pbk_parse_status(reply, len, &sim_used, &sim_total) != NL_PBK_OK) {
+        strcpy(out, "Could not read SIM status. Nothing changed."); return;
+    }
+    if (sim_total == 0 || sim_total > 500) sim_total = 500;
+
+    for (loc = 1; loc <= (long)sim_total && k < 260 && wrote < (int)sim_used; loc++) {
+        rn = nl_pbk_req_read(req, sizeof req, NL_PBK_MEM_SIM, (nl_u16)loc);
+        if (rn < 0) continue;
+        if (phonelink_request(NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE, reply, sizeof reply, &len, 3000) != NL_OK) continue;
+        if (nl_pbk_parse_entry(reply, len, (nl_u16)loc, &e) != NL_PBK_OK) continue;   /* skip empty */
+        rn = nl_pbk_req_write(req, sizeof req, NL_PBK_MEM_ME, (nl_u16)(k + 1), &e);
+        if (rn < 0) { strcpy(out, "Could not build a write. SIM untouched."); return; }
+        if (phonelink_request(NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE, reply, sizeof reply, &len, 4000) != NL_OK
+            || len < 4 || reply[3] != NL_PBK_WRITE_OK) {
+            strcpy(out, "A write to phone memory failed. SIM untouched; ");
+            append_num(out, wrote); strcat(out, " copied."); return;
+        }
+        rn = nl_pbk_req_read(req, sizeof req, NL_PBK_MEM_ME, (nl_u16)(k + 1));
+        if (phonelink_request(NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE, reply, sizeof reply, &len, 3000) != NL_OK
+            || nl_pbk_parse_entry(reply, len, (nl_u16)(k + 1), &rd) != NL_PBK_OK
+            || strcmp(rd.name, e.name) != 0) {
+            strcpy(out, "Verify failed; the SIM was NOT cleared and the phone copies are kept."); return;
+        }
+        simlocs[k++] = (nl_u16)loc; wrote++;
+    }
+
+    for (i = 0; i < k; i++) {
+        rn = nl_pbk_req_delete(req, sizeof req, NL_PBK_MEM_SIM, simlocs[i]);
+        if (phonelink_request(NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE, reply, sizeof reply, &len, 3000) == NL_OK
+            && len >= 4 && reply[3] == NL_PBK_DELETE_OK) cleared++;
+    }
+    strcpy(out, "Migrated "); append_num(out, wrote);
+    strcat(out, " contacts to phone memory; cleared "); append_num(out, cleared);
+    strcat(out, " from the SIM.\rNow set on the 7110: Names, Options, Settings, Memory in use, Phone.");
+}
+#endif
+
 static void DoAction(short item)
 {
     char to[32], text[256], date[16], tim[8], atext[128], msg[352];
@@ -650,38 +791,58 @@ static void DoAction(short item)
         to[0] = text[0] = 0;
         if (dlg_new_message(to, sizeof to, text, sizeof text)) {
             if (!to[0]) { dlg_notice("Enter a number to send to."); break; }
-            strcpy(msg, "Ready to send to ");
-            strcat(msg, to);
-            strcat(msg, ".");
-            strcat(msg, kNoLink);
+#ifdef NOKIALINK_REALPHONE
+            action_send_sms(to, text, msg);
             dlg_notice(msg);
+#else
+            strcpy(msg, "Ready to send to ");
+            strcat(msg, to); strcat(msg, "."); strcat(msg, kNoLink);
+            dlg_notice(msg);
+#endif
         }
         break;
     case kAddApptItem:
         date[0] = tim[0] = atext[0] = 0; type = 0;
         if (dlg_add_appt(&type, date, sizeof date, tim, sizeof tim,
                          atext, sizeof atext)) {
+#ifdef NOKIALINK_REALPHONE
+            action_add_appt(type, date, tim, atext, msg);
+            dlg_notice(msg);
+#else
             strcpy(msg, "Ready to add a ");
             strcat(msg, type ? "reminder" : "meeting");
             if (date[0]) { strcat(msg, " on "); strcat(msg, date); }
-            strcat(msg, ".");
-            strcat(msg, kNoLink);
+            strcat(msg, "."); strcat(msg, kNoLink);
             dlg_notice(msg);
+#endif
         }
         break;
     case kSyncItem:
         if (dlg_confirm("Sync contacts between the phone and the Plus?\r"
                         "Changes are listed before anything is written."))
-            dlg_notice("No sync was run.\rThe serial link is not built yet.");
+            dlg_notice("Sync needs the contacts store on the Plus, "
+                       "which is not built yet.");
         break;
     case kMigrateItem:
-        if (dlg_confirm("Move all SIM data into the phone's own memory, "
-                        "then clear it from the SIM?"))
+        if (dlg_confirm("Move all SIM contacts into the phone's own memory, "
+                        "then clear them from the SIM?")) {
+#ifdef NOKIALINK_REALPHONE
+            action_migrate(msg);
+            dlg_notice(msg);
+#else
             dlg_notice("Nothing was moved.\rThe serial link is not built yet.");
+#endif
+        }
         break;
     case kSetClockItem:
-        if (dlg_confirm("Set the phone's clock from the Macintosh?"))
+        if (dlg_confirm("Set the phone's clock from the Macintosh?")) {
+#ifdef NOKIALINK_REALPHONE
+            action_set_clock(msg);
+            dlg_notice(msg);
+#else
             dlg_notice("The clock was not set.\rThe serial link is not built yet.");
+#endif
+        }
         break;
     }
 }
