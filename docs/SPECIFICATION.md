@@ -374,9 +374,15 @@ store, after showing what will be written.
   SIM → Phone, Set Clock. New Message and Add Appointment open a form
   dialog (recipient and text; type, date, time and text); Sync, Migrate
   and Set Clock first show a confirmation that names the write (APP-3).
-  Started: the Actions menu and all five dialogs are built and gather and
-  confirm input; until the link is built each action names what it would do
-  and then reports that the link is not ready (built 19 November 2026).
+  Started: the Actions menu and all five dialogs are built. In the live
+  build (over the cable) four of them do the real work and report the result
+  — New Message sends through the phone's own message centre; Add Appointment
+  adds the note; Set Clock sets the phone from the Macintosh; Migrate SIM →
+  Phone copies, verifies, then clears, aborting before clearing if anything
+  is wrong (CON-9). Sync still reports that it needs the Plus-side contacts
+  store, which is not built yet. In the sample and pretend-phone builds every
+  action names what it would do and then reports that the link is not ready
+  (built 19 November 2026; untested on hardware until the cable lead exists).
 
 ### 4.14 Further phone functions, to be tried (EXT)
 
