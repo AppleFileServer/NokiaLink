@@ -22,6 +22,7 @@
 #include "nlpbk.h"
 #include "listwin.h"
 #include "nlsms.h"
+#include "nlcal.h"
 #include "dialogs.h"
 #ifdef NOKIALINK_SMOKE
 #include "smoke.h"
@@ -192,6 +193,7 @@ static void BuildStatusViaRealLink(void)
 
     (void)BuildSampleStatus;
 }
+
 #endif
 
 
@@ -387,12 +389,216 @@ static void fill_phone_view(void)
 }
 
 /* Switch the window to a view: refill the list and rename the window. */
+#ifdef NOKIALINK_REALPHONE
+/* ---- Row-building helpers for the live views ------------------------ */
+
+static const char *gMons[] = {"","Jan","Feb","Mar","Apr","May","Jun",
+                              "Jul","Aug","Sep","Oct","Nov","Dec"};
+
+/* Append text, but never past the end of a list row. */
+#define NL_ROWMAX 118
+static void rcat(char *row, const char *s)
+{
+    int n = (int)strlen(row), i;
+    for (i = 0; s[i] && n < NL_ROWMAX; i++) row[n++] = s[i];
+    row[n] = 0;
+}
+static void rpad(char *row, int col)   /* pad with spaces up to column col */
+{
+    int n = (int)strlen(row);
+    while (n < col && n < NL_ROWMAX) row[n++] = ' ';
+    row[n] = 0;
+}
+static void rdate(char *row, nl_date d)
+{
+    int mo = nl_date_month(d);
+    append_num(row, nl_date_day(d)); rcat(row, " ");
+    rcat(row, (mo >= 1 && mo <= 12) ? gMons[mo] : "?"); rcat(row, " ");
+    append_num(row, nl_date_year(d));
+}
+static void rhm(char *row, long secs)
+{
+    long hh = secs / 3600, mi = (secs / 60) % 60;
+    if (hh < 10) rcat(row, "0");
+    append_num(row, hh);
+    rcat(row, ":");
+    if (mi < 10) rcat(row, "0");
+    append_num(row, mi);
+}
+
+/* ---- Contacts (phone memory, then SIM) ----------------------------- */
+
+static void read_mem_contacts(nl_u8 mem)
+{
+    nl_u8 req[32], reply[512]; long rn, len, loc;
+    nl_u16 used = 0, total = 0; int found = 0; nl_pbk_entry e;
+
+    rn = nl_pbk_req_status(req, sizeof req, mem);
+    if (phonelink_request(NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE,
+                          reply, sizeof reply, &len, 3000) != NL_OK) return;
+    if (nl_pbk_parse_status(reply, len, &used, &total) != NL_PBK_OK) return;
+    if (total == 0 || total > 2000) total = 2000;
+    for (loc = 1; loc <= (long)total && found < (int)used; loc++) {
+        rn = nl_pbk_req_read(req, sizeof req, mem, (nl_u16)loc);
+        if (rn < 0) continue;
+        if (phonelink_request(NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE,
+                              reply, sizeof reply, &len, 3000) != NL_OK) continue;
+        if (nl_pbk_parse_entry(reply, len, (nl_u16)loc, &e) != NL_PBK_OK) continue;
+        add_entry_row(&e);
+        found++;
+    }
+}
+
+static void BuildContactsViaRealLink(void)
+{
+    listwin_clear(&gMain);
+    read_mem_contacts(NL_PBK_MEM_ME);
+    read_mem_contacts(NL_PBK_MEM_SIM);
+    (void)BuildContacts;   /* the sample builder is unused in this build */
+}
+
+/* ---- Call registers (dialled, missed, received) -------------------- */
+
+static void read_register_rows(nl_u8 mem, const char *label)
+{
+    nl_u8 req[32], reply[512]; long rn, len, loc; int miss = 0; nl_pbk_entry e;
+    char row[128];
+
+    for (loc = 1; loc <= 30 && miss < 3; loc++) {
+        rn = nl_pbk_req_read(req, sizeof req, mem, (nl_u16)loc);
+        if (rn < 0) break;
+        if (phonelink_request(NL_PBK_MSG_TYPE, req, rn, NL_PBK_MSG_TYPE,
+                              reply, sizeof reply, &len, 2500) != NL_OK) { miss++; continue; }
+        if (nl_pbk_parse_entry(reply, len, (nl_u16)loc, &e) != NL_PBK_OK) { miss++; continue; }
+        if (!e.has_when) break;   /* past the end of the register */
+        row[0] = 0;
+        rcat(row, label); rpad(row, 10);
+        if (e.name[0]) rcat(row, e.name);
+        else if (e.nnumbers) rcat(row, e.numbers[0].text);
+        rpad(row, 28); rcat(row, "  ");
+        rdate(row, e.when.date); rcat(row, "  "); rhm(row, e.when.secs);
+        listwin_add(&gMain, row);
+        miss = 0;
+    }
+}
+
+static void BuildCallsViaRealLink(void)
+{
+    listwin_clear(&gMain);
+    read_register_rows(NL_PBK_MEM_DIALLED,  "Dialled");
+    read_register_rows(NL_PBK_MEM_MISSED,   "Missed");
+    read_register_rows(NL_PBK_MEM_RECEIVED, "Received");
+    (void)BuildCalls;
+}
+
+/* ---- Calendar notes ------------------------------------------------ */
+
+static void append_cal_row(const nl_cal_note *nt)
+{
+    char row[140]; const char *tn;
+    row[0] = 0;
+    if (nt->date) { rdate(row, nt->date); rcat(row, "  "); }
+    if (nt->hour || nt->minute) { rhm(row, (long)nt->hour * 3600 + nt->minute * 60); rcat(row, "  "); }
+    switch (nt->type) {
+    case NL_CAL_MEETING:  tn = "Meeting: ";  break;
+    case NL_CAL_CALL:     tn = "Call: ";     break;
+    case NL_CAL_BIRTHDAY: tn = "Birthday: "; break;
+    default:              tn = "Reminder: "; break;
+    }
+    rcat(row, tn);
+    rcat(row, nt->text);
+    listwin_add(&gMain, row);
+}
+
+static void BuildCalendarViaRealLink(void)
+{
+    nl_u8 req[16], reply[512]; long rn, len;
+    nl_u16 total = 0, locs[NL_CAL_MAX_LOCS]; static nl_u16 all[512];
+    int nlocs = 0, nall = 0, i, page; nl_u16 after = 0; nl_cal_note nt;
+
+    listwin_clear(&gMain);
+    for (page = 0; page < 32; page++) {
+        rn = nl_cal_req_notes_info(req, sizeof req, after);
+        if (phonelink_request(NL_CAL_MSG_TYPE, req, rn, NL_CAL_MSG_TYPE,
+                              reply, sizeof reply, &len, 2500) != NL_OK) return;
+        if (nl_cal_parse_notes_info(reply, len, &total, locs, NL_CAL_MAX_LOCS, &nlocs) != NL_CAL_OK)
+            return;   /* NL_CAL_ERR_EMPTY too: no notes */
+        for (i = 0; i < nlocs && nall < 512; i++) all[nall++] = locs[i];
+        if (nlocs == 0 || nall >= (int)total) break;
+        after = locs[nlocs - 1];
+    }
+    for (i = 0; i < nall; i++) {
+        rn = nl_cal_req_get_note(req, sizeof req, all[i]);
+        if (phonelink_request(NL_CAL_MSG_TYPE, req, rn, NL_CAL_MSG_TYPE,
+                              reply, sizeof reply, &len, 2500) != NL_OK) continue;
+        if (nl_cal_parse_note(reply, len, &nt) != NL_CAL_OK) continue;
+        append_cal_row(&nt);
+    }
+    (void)BuildCalendar;
+}
+
+/* ---- Messages (every folder) --------------------------------------- */
+
+/* One folder's messages. A long (concatenated) message is shown by its
+ * first part, marked "(1/N)"; the parts are joined in full on the archive
+ * path (host tool), to be brought here with the Messages read later. */
+static void read_folder_rows(nl_u8 folderid)
+{
+    nl_u8 req[16], reply[512]; long rn, len; int i, nloc = 0, extra = 0;
+    static nl_u16 locs[128]; nl_sms m; char row[128];
+
+    rn = nl_sms_req_folder_status(req, sizeof req, folderid);
+    if (phonelink_request(NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE,
+                          reply, sizeof reply, &len, 2500) != NL_OK) return;
+    if (nl_sms_parse_folder_status(reply, len, locs, 128, &nloc) != NL_SMS_OK) return;
+    if (folderid == NL_SMS_FOLDER_INBOX) {
+        rn = nl_sms_req_folder_status(req, sizeof req, NL_SMS_FOLDER_INBOX_UNREAD);
+        if (phonelink_request(NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE,
+                              reply, sizeof reply, &len, 2500) == NL_OK) {
+            nl_sms_parse_folder_status(reply, len, locs + nloc, 128 - nloc, &extra);
+            nloc += extra;
+        }
+    }
+    for (i = 0; i < nloc; i++) {
+        rn = nl_sms_req_read(req, sizeof req, folderid, locs[i]);
+        if (phonelink_request(NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE,
+                              reply, sizeof reply, &len, 2500) != NL_OK) continue;
+        if (nl_sms_parse_message(reply, len, &m) != NL_SMS_OK) continue;
+        if (m.concat && m.concat_seq != 1) continue;   /* show the first part */
+        row[0] = 0;
+        if (m.pdu == NL_SMS_SUBMIT) rcat(row, "me > ");
+        rcat(row, m.number[0] ? m.number : "(no number)");
+        rpad(row, 18); rcat(row, "  ");
+        rcat(row, m.text);
+        if (m.concat) { rcat(row, " (1/"); append_num(row, m.concat_total); rcat(row, ")"); }
+        listwin_add(&gMain, row);
+    }
+}
+
+static void BuildMessagesViaRealLink(void)
+{
+    nl_u8 req[16], reply[512]; long rn, len; int nf = 0, i;
+    static nl_sms_folder folders[NL_SMS_MAX_FOLDERS];
+
+    listwin_clear(&gMain);
+    rn = nl_sms_req_folders(req, sizeof req);
+    if (phonelink_request(NL_SMS_MSG_TYPE, req, rn, NL_SMS_MSG_TYPE,
+                          reply, sizeof reply, &len, 2500) != NL_OK) return;
+    if (nl_sms_parse_folders(reply, len, folders, NL_SMS_MAX_FOLDERS, &nf) != NL_SMS_OK) return;
+    for (i = 0; i < nf; i++)
+        read_folder_rows(folders[i].id);
+    (void)BuildMessages;
+}
+#endif
+
 static void SwitchView(short v)
 {
     gView = v;
     switch (v) {
     case VIEW_CONTACTS:
-#ifdef NOKIALINK_FAKEPHONE
+#ifdef NOKIALINK_REALPHONE
+        BuildContactsViaRealLink();
+#elif defined(NOKIALINK_FAKEPHONE)
         BuildContactsViaLink();
 #else
         BuildContacts();
@@ -400,15 +606,27 @@ static void SwitchView(short v)
         set_title("NokiaLink \320 Contacts");
         break;
     case VIEW_MESSAGES:
+#ifdef NOKIALINK_REALPHONE
+        BuildMessagesViaRealLink();
+#else
         BuildMessages();
+#endif
         set_title("NokiaLink \320 Messages");
         break;
     case VIEW_CALENDAR:
+#ifdef NOKIALINK_REALPHONE
+        BuildCalendarViaRealLink();
+#else
         BuildCalendar();
+#endif
         set_title("NokiaLink \320 Calendar");
         break;
     case VIEW_CALLS:
+#ifdef NOKIALINK_REALPHONE
+        BuildCallsViaRealLink();
+#else
         BuildCalls();
+#endif
         set_title("NokiaLink \320 Calls");
         break;
     default:
