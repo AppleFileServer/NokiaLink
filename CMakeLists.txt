@@ -54,6 +54,7 @@ add_application(NokiaLink
     src/app/main.c
     src/app/listwin.c
     src/app/dialogs.c
+    src/app/phonelink.c
     src/core/fbus.c
     src/core/link.c
     src/core/nlcal.c
@@ -98,5 +99,13 @@ if(NOKIALINK_FAKEPHONE)
     target_sources(NokiaLink PRIVATE tests/fakephone.c)
     target_include_directories(NokiaLink PRIVATE tests)
     target_compile_definitions(NokiaLink PRIVATE NOKIALINK_FAKEPHONE)
+endif()
+
+# The real phone over the cable: the app opens the live FBUS link over the
+# SCC (src/plus/scc.c via src/app/phonelink.c) instead of sample data.
+# 68k build only; needs the DLR-3P adapter lead to actually run.
+option(NOKIALINK_REALPHONE "Drive the app from the real phone over the SCC" OFF)
+if(NOKIALINK_REALPHONE)
+    target_compile_definitions(NokiaLink PRIVATE NOKIALINK_REALPHONE)
 endif()
 target_compile_options(NokiaLink PRIVATE -Wall -Wextra -Wno-multichar -Wno-unused-parameter -Wno-pointer-sign)

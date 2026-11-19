@@ -30,6 +30,9 @@
 #include "link.h"
 #include "fakephone.h"   /* the pretend phone, standing in for the cable */
 #endif
+#ifdef NOKIALINK_REALPHONE
+#include "phonelink.h"   /* the live FBUS link over the SCC (modem port) */
+#endif
 
 /* The status shown in the Phone window. Until the serial link is built,
  * it is filled from canned replies decoded by the nlinfo module, so the
@@ -157,6 +160,37 @@ static void BuildStatusViaLink(void)
     if (nl_link_request(&gLink, 0x19, req, rn, 0x19, reply, sizeof reply, &len, 3000) == NL_OK) fill_clock(reply, len);
 
     (void)BuildSampleStatus; (void)fill_signal; (void)body_signal;
+}
+#endif
+
+#ifdef NOKIALINK_REALPHONE
+/* The real path: open the link over the cable and read the status from the
+ * phone, decoding each reply with the same fill_* functions. This is the
+ * first live read; the other views and the actions follow the same shape. */
+static void BuildStatusViaRealLink(void)
+{
+    nl_u8 req[16], reply[256]; long rn, len; int at_ok = 0;
+
+    gModel[0]=0; gFirmware[0]=0; gBattery[0]=0; gNetwork[0]=0; gClock[0]=0;
+
+    if (phonelink_open(&at_ok) != NL_OK) {
+        strcpy(gModel, "No phone found.");
+        strcpy(gFirmware, "Check the cable, and that it is on.");
+        return;
+    }
+    strcpy(gBattery, "Battery \321");
+    rn = nl_info_req_identify(req, sizeof req);
+    if (phonelink_request(0xD1, req, rn, 0xD2, reply, sizeof reply, &len, 4000) == NL_OK) fill_identify(reply, len);
+    rn = nl_info_req_battery(req, sizeof req);
+    if (phonelink_request(0x17, req, rn, 0x17, reply, sizeof reply, &len, 4000) == NL_OK) fill_battery(reply, len);
+    rn = nl_info_req_signal(req, sizeof req);
+    if (phonelink_request(0x0A, req, rn, 0x0A, reply, sizeof reply, &len, 4000) == NL_OK) fill_signal(reply, len);
+    rn = nl_info_req_network(req, sizeof req);
+    if (phonelink_request(0x0A, req, rn, 0x0A, reply, sizeof reply, &len, 4000) == NL_OK) fill_network(reply, len);
+    rn = nl_info_req_clock(req, sizeof req);
+    if (phonelink_request(0x19, req, rn, 0x19, reply, sizeof reply, &len, 4000) == NL_OK) fill_clock(reply, len);
+
+    (void)BuildSampleStatus;
 }
 #endif
 
@@ -343,7 +377,9 @@ static void fill_phone_view(void)
     if (gBattery[0])  listwin_add(&gMain, gBattery);
     if (gNetwork[0])  listwin_add(&gMain, gNetwork);
     if (gClock[0])    listwin_add(&gMain, gClock);
-#ifdef NOKIALINK_FAKEPHONE
+#ifdef NOKIALINK_REALPHONE
+    listwin_add(&gMain, "(read live from the phone over the cable)");
+#elif defined(NOKIALINK_FAKEPHONE)
     listwin_add(&gMain, "(read through the link from the pretend phone)");
 #else
     listwin_add(&gMain, "(sample data \320 the serial link is not built yet)");
@@ -537,7 +573,9 @@ static void Init(void)
     AppendResMenu(GetMenuHandle(kAppleMenu), 'DRVR');
     DrawMenuBar();
 
-#ifdef NOKIALINK_FAKEPHONE
+#ifdef NOKIALINK_REALPHONE
+    BuildStatusViaRealLink();
+#elif defined(NOKIALINK_FAKEPHONE)
     BuildStatusViaLink();
 #else
     BuildSampleStatus();
@@ -562,6 +600,13 @@ int main(void)
     {
         if (WaitNextEvent(everyEvent, &event, 30, nil))
             HandleEvent(&event);
+#ifdef NOKIALINK_REALPHONE
+        else
+            phonelink_poll();   /* drain anything the phone sent unasked */
+#endif
     }
+#ifdef NOKIALINK_REALPHONE
+    phonelink_close();
+#endif
     return 0;
 }
