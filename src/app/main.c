@@ -166,6 +166,7 @@ enum {
     kFileMenu = 129, kQuitItem = 1,
     kEditMenu = 130,
     kViewMenu = 131, kPhoneItem = 1, kContactsItem = 2, kMessagesItem = 3,
+    kCalendarItem = 4, kCallsItem = 5,
     kMainWindow = 128,
     kAboutAlert = 128
 };
@@ -202,6 +203,8 @@ static long build_pbk_reply(nl_u8 *b, long cap, const char *name, nl_u8 ntype, c
 #define VIEW_PHONE    0
 #define VIEW_CONTACTS 1
 #define VIEW_MESSAGES 2
+#define VIEW_CALENDAR 3
+#define VIEW_CALLS    4
 static nl_listwin gMain;
 static short      gView;
 
@@ -277,6 +280,31 @@ static void BuildMessages(void)
     (void)nl_sms_pdu_name;   /* nlsms is linked in for the real read later */
 }
 
+/* Fill the Calendar view. Sample rows for now (all fictional -- public
+ * repo); the real list comes from the calendar read over the link, decoded
+ * by nlcal as the host tool already does. */
+static void BuildCalendar(void)
+{
+    listwin_clear(&gMain);
+    listwin_add(&gMain, "Mon 23 Nov  09:00  Meeting: project review");
+    listwin_add(&gMain, "Tue 24 Nov  14:30  Call: dentist");
+    listwin_add(&gMain, "Wed 25 Nov         Reminder: pay rent");
+    listwin_add(&gMain, "Sat 28 Nov         Birthday: Grace");
+    listwin_add(&gMain, "Mon 30 Nov  18:00  Meeting: book club");
+}
+
+/* Fill the Call-log view. Sample rows for now (all fictional -- public
+ * repo); the real list comes from the call-log read over the link. */
+static void BuildCalls(void)
+{
+    listwin_clear(&gMain);
+    listwin_add(&gMain, "Dialled   Ada Lovelace     17 Nov  16:42");
+    listwin_add(&gMain, "Missed    07700900042      17 Nov  11:08");
+    listwin_add(&gMain, "Received  Alan Turing       16 Nov  19:20");
+    listwin_add(&gMain, "Dialled   Grace Hopper      16 Nov  09:15");
+    listwin_add(&gMain, "Received  07700900003      15 Nov  21:03");
+}
+
 /* The stack: the Toolbox's own calls and interrupts come on top of what
    NokiaLink uses. Set before the heap is first grown. */
 enum { kStackSize = 16L * 1024 };
@@ -331,6 +359,14 @@ static void SwitchView(short v)
         BuildMessages();
         set_title("NokiaLink \320 Messages");
         break;
+    case VIEW_CALENDAR:
+        BuildCalendar();
+        set_title("NokiaLink \320 Calendar");
+        break;
+    case VIEW_CALLS:
+        BuildCalls();
+        set_title("NokiaLink \320 Calls");
+        break;
     default:
         fill_phone_view();
         set_title("NokiaLink \320 Phone");
@@ -369,6 +405,8 @@ static void DoMenu(long choice)
         if (item == kPhoneItem) SwitchView(VIEW_PHONE);
         else if (item == kContactsItem) SwitchView(VIEW_CONTACTS);
         else if (item == kMessagesItem) SwitchView(VIEW_MESSAGES);
+        else if (item == kCalendarItem) SwitchView(VIEW_CALENDAR);
+        else if (item == kCallsItem) SwitchView(VIEW_CALLS);
         break;
     }
     HiliteMenu(0);

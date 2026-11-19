@@ -77,6 +77,8 @@ resource 'MENU' (131) {
         "Phone", noIcon, noKey, noMark, plain;
         "Contacts", noIcon, noKey, noMark, plain;
         "Messages", noIcon, noKey, noMark, plain;
+        "Calendar", noIcon, noKey, noMark, plain;
+        "Calls", noIcon, noKey, noMark, plain;
     }
 };
 
